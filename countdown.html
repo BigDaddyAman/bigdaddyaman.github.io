@@ -186,9 +186,25 @@
             return null;
         }
 
+<<<<<<< HEAD
         // Start the countdown on page load
         window.onload = () => {
             startCountdown();
+=======
+        function showAdOnce() {
+            const adCookie = getCookie("adShown");
+            if (!adCookie) {
+                // Show the ad and set the cookie
+                alert("Showing ad..."); // Replace with actual ad code
+                setCookie("adShown", "true", 1); // 1 day expiration
+            }
+        }
+
+        // Start the countdown on page load
+        window.onload = () => {
+            startCountdown();
+            showAdOnce();
+>>>>>>> 06e5ef48961c7af2ce2e0d93cd7d1eb21116a02e
         }
     </script>
 </body>
