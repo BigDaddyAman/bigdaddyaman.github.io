@@ -91,11 +91,9 @@
         <p id="error-message"></p>
     </div>
     <button class="report-button" onclick="reportIssue()">Report Issue</button>
-
     <footer>
         © Kakifilem 2024
     </footer>
-
     <script>
         function startCountdown() {
             const countdownElement = document.getElementById('countdown');
@@ -119,13 +117,13 @@
             const errorMessage = document.getElementById('error-message');
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
-            const videoName = urlParams.get('videoName');  // Ensure videoName is fetched
+            const videoName = urlParams.get('videoName'); // Ensure videoName is fetched
             if (token && videoName) {
                 const telegramLink = `https://t.me/Requestfilemv3_bot?start=${encodeURIComponent(token)}`;
                 console.log(`Sending token to: ${telegramLink}`);
                 window.open(telegramLink, '_blank', 'noopener,noreferrer');
                 getFileButton.textContent = "Sudah Dihantar";
-                errorMessage.style.display = "none";  // Hide the error message if successful
+                errorMessage.style.display = "none"; // Hide the error message if successful
             } else {
                 alert("No token or video name found in URL");
             }
@@ -135,13 +133,13 @@
             const errorMessage = document.getElementById('error-message');
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
-            const videoName = urlParams.get('videoName');  // Get video name from URL parameter
+            const videoName = urlParams.get('videoName'); // Get video name from URL parameter
             if (!videoName) {
                 alert("No video name found in URL");
                 return;
             }
             const reportMessage = `Report issue for video: ${videoName}, with token: ${token}`;
-            fetch('http://localhost:5000/report', {  // Use the correct URL for your Flask app
+            fetch('http://localhost:5000/report', { // Use the correct URL for your Flask app
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -186,25 +184,9 @@
             return null;
         }
 
-<<<<<<< HEAD
         // Start the countdown on page load
         window.onload = () => {
             startCountdown();
-=======
-        function showAdOnce() {
-            const adCookie = getCookie("adShown");
-            if (!adCookie) {
-                // Show the ad and set the cookie
-                alert("Showing ad..."); // Replace with actual ad code
-                setCookie("adShown", "true", 1); // 1 day expiration
-            }
-        }
-
-        // Start the countdown on page load
-        window.onload = () => {
-            startCountdown();
-            showAdOnce();
->>>>>>> 06e5ef48961c7af2ce2e0d93cd7d1eb21116a02e
         }
     </script>
 </body>
