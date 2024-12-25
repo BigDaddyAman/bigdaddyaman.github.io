@@ -26,11 +26,6 @@
         h1 {
             color: #007bff;
         }
-        img {
-            max-width: 100%;
-            height: auto;
-            margin-bottom: 20px;
-        }
         #countdown {
             font-size: 20px;
             margin: 20px 0;
@@ -46,18 +41,6 @@
             cursor: pointer;
         }
         button.show {
-            display: inline-block;
-        }
-        .link-button {
-            margin-top: 10px;
-            background-color: #007bff;
-            color: #fff;
-            border: none;
-            padding: 10px 20px;
-            font-size: 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            text-decoration: none;
             display: inline-block;
         }
         footer {
@@ -83,16 +66,14 @@
 </head>
 <body>
     <div class="container">
-        <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image">
         <h1>Video Anda Sedia!</h1>
         <div id="countdown"></div>
         <button id="get-file" onclick="redirectToTelegram()">Dapatkan Video</button>
-        <a href="https://t.me/kakifilem" class="link-button">Join Channel</a>
         <p id="error-message"></p>
     </div>
     <button class="report-button" onclick="reportIssue()">Report Issue</button>
     <footer>
-        © Aman 2024
+        © Kakifilem 2024
     </footer>
     <script>
         function startCountdown() {
