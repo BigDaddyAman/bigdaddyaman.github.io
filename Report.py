@@ -23,7 +23,8 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for the app
 
 # Ensure there's an existing event loop to use
-loop = asyncio.get_event_loop()
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
 
 async def send_report_message(message):
     try:
@@ -38,7 +39,7 @@ def report():
     data = request.json
     message = data.get('message')
     if message:
-        loop.create_task(send_report_message(message))  # Use the existing event loop
+        asyncio.run_coroutine_threadsafe(send_report_message(message), loop)
         return jsonify({"status": "success", "message": "Report sent"}), 200
     return jsonify({"status": "error", "message": "No message found"}), 400
 
