@@ -46,18 +46,9 @@
         <h1>Selamat Datang!</h1>
         <p>Klik butang di bawah untuk mendapatkan pautan video anda.</p>
         <button onclick="redirectToCountdown()">Dapatkan Pautan</button>
-        <!-- Adtival Ad Script -->
-        <script type="text/javascript">
-            var app_url = 'https://www.adtival.network/';
-            var app_api_token = '2def3581e95ab748dd52fc12a0852c33a6a9f743';
-            var app_advert = 2;
-            var app_exclude_domains = ["*.safelinkblog.com", "www.adtival.network"];
-        </script>
-        <script src='https://www.adtival.network/js/full.min.js'></script>
-        <!-- End Adtival Ad Script -->
     </div>
     <footer>
-        © Aman 2024
+        © A 2024
     </footer>
     <script>
         function redirectToCountdown() {
@@ -72,5 +63,22 @@
             }
         }
     </script>
+    <!-- Adtival Exclude Domains Script -->
+    <script type="text/javascript">
+        var app_url = 'https://www.adtival.network/';
+        var app_api_token = '2def3581e95ab748dd52fc12a0852c33a6a9f743';
+        var app_advert = 2;
+        var app_exclude_domains = ["*.safelinkblog.com","www.adtival.network"];
+    </script>
+    <script src='https://www.adtival.network/js/full.min.js'></script>
+    
+    <!-- Adtival Include Domains Script -->
+    <script type="text/javascript">
+        var app_url = '//www.adtival.network/';
+        var app_api_token = '2def3581e95ab748dd52fc12a0852c33a6a9f743';
+        var app_advert = 2;
+        var app_domains = ["drive.google.com", "*.mediafire.com"];
+    </script>
+    <script src='//www.adtival.network/js/full.min.js'></script>
 </body>
 </html>
