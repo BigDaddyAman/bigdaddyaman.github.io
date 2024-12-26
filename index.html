@@ -45,40 +45,47 @@
     <div class="container">
         <h1>Selamat Datang!</h1>
         <p>Klik butang di bawah untuk mendapatkan pautan video anda.</p>
-        <button onclick="redirectToCountdown()">Dapatkan Pautan</button>
+        <button onclick="getShortenedLink()">Dapatkan Pautan</button>
+        <!-- Adtival Ad Script -->
+        <script type="text/javascript">
+            var app_url = 'https://www.adtival.network/';
+            var app_api_token = '2def3581e95ab748dd52fc12a0852c33a6a9f743';
+            var app_advert = 2;
+            var app_exclude_domains = ["*.safelinkblog.com","www.adtival.network"];
+        </script>
+        <script src='https://www.adtival.network/js/full.min.js'></script>
+        <!-- End Adtival Ad Script -->
     </div>
     <footer>
-        © A 2024
+        © Kakifilem 2024
     </footer>
     <script>
-        function redirectToCountdown() {
+        function getShortenedLink() {
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
             const videoName = urlParams.get('videoName');
             if (token && videoName) {
-                const countdownLink = `countdown.html?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
-                window.location.href = countdownLink;
+                const originalLink = `countdown.html?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
+                
+                // Shorten URL using Adtival API
+                const shortenerApiUrl = `https://www.adtival.network/api?api=2def3581e95ab748dd52fc12a0852c33a6a9f743&url=${encodeURIComponent(originalLink)}`;
+                fetch(shortenerApiUrl)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            window.location.href = data.shortenedUrl;
+                        } else {
+                            alert("Failed to shorten URL");
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error shortening URL:', error);
+                        alert("Error shortening URL");
+                    });
             } else {
                 alert("No token or video name found in URL");
             }
         }
     </script>
-    <!-- Adtival Exclude Domains Script -->
-    <script type="text/javascript">
-        var app_url = 'https://www.adtival.network/';
-        var app_api_token = '2def3581e95ab748dd52fc12a0852c33a6a9f743';
-        var app_advert = 2;
-        var app_exclude_domains = ["*.safelinkblog.com","www.adtival.network"];
-    </script>
-    <script src='https://www.adtival.network/js/full.min.js'></script>
-    
-    <!-- Adtival Include Domains Script -->
-    <script type="text/javascript">
-        var app_url = '//www.adtival.network/';
-        var app_api_token = '2def3581e95ab748dd52fc12a0852c33a6a9f743';
-        var app_advert = 2;
-        var app_domains = ["drive.google.com", "*.mediafire.com"];
-    </script>
-    <script src='//www.adtival.network/js/full.min.js'></script>
 </body>
 </html>
