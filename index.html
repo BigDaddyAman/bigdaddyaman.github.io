@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>Dapatkan Pautan Video Anda</title>
+    <meta name="monetag" content="5f607e8b3932c7d9970ff176e1c087b6">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
@@ -25,6 +26,11 @@
         h1 {
             color: #007bff;
         }
+        img {
+            max-width: 100%;
+            height: auto;
+            margin-bottom: 20px;
+        }
         button {
             background-color: #007bff;
             color: #fff;
@@ -43,45 +49,24 @@
 </head>
 <body>
     <div class="container">
+        <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image">
         <h1>Selamat Datang!</h1>
         <p>Klik butang di bawah untuk mendapatkan pautan video anda.</p>
-        <button onclick="getShortenedLink()">Dapatkan Pautan</button>
-        <!-- Adtival Ad Script -->
-        <script type="text/javascript">
-            var app_url = 'https://www.adtival.network/';
-            var app_api_token = '2def3581e95ab748dd52fc12a0852c33a6a9f743';
-            var app_advert = 2;
-            var app_exclude_domains = ["*.safelinkblog.com","www.adtival.network"];
-        </script>
-        <script src='https://www.adtival.network/js/full.min.js'></script>
-        <!-- End Adtival Ad Script -->
+        <button onclick="redirectToCountdown()">Dapatkan Pautan</button>
     </div>
+
     <footer>
-        © Kakifilem 2024
+        © Aman 2024
     </footer>
+
     <script>
-        function getShortenedLink() {
+        function redirectToCountdown() {
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
             const videoName = urlParams.get('videoName');
             if (token && videoName) {
-                const originalLink = `countdown.html?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
-                
-                // Shorten URL using Adtival API
-                const shortenerApiUrl = `https://www.adtival.network/api?api=2def3581e95ab748dd52fc12a0852c33a6a9f743&url=${encodeURIComponent(originalLink)}`;
-                fetch(shortenerApiUrl)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status === 'success') {
-                            window.location.href = data.shortenedUrl;
-                        } else {
-                            alert("Failed to shorten URL");
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error shortening URL:', error);
-                        alert("Error shortening URL");
-                    });
+                const countdownLink = `countdown.html?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
+                window.location.href = countdownLink;
             } else {
                 alert("No token or video name found in URL");
             }
