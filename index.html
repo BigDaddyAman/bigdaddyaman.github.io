@@ -61,15 +61,12 @@
 
     <script>
         function redirectToCountdown() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const token = urlParams.get('token');
-            const videoName = urlParams.get('videoName');
-            if (token && videoName) {
-                const countdownLink = `countdown.html?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
-                window.location.href = countdownLink;
-            } else {
-                alert("No token or video name found in URL");
-            }
+            // Hardcoded values for testing
+            const token = "testToken123";
+            const videoName = "testVideo.mp4";
+
+            const countdownLink = `countdown.html?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
+            window.location.href = countdownLink;
         }
     </script>
 </body>
