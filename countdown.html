@@ -21,6 +21,7 @@
             padding: 20px;
             border-radius: 10px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            position: relative;
         }
         h1 {
             color: #007bff;
@@ -30,6 +31,11 @@
             height: auto;
             margin-bottom: 20px;
         }
+        #countdown {
+            font-size: 20px;
+            margin: 20px 0;
+            color: #ff0000;
+        }
         button {
             background-color: #007bff;
             color: #fff;
@@ -38,12 +44,40 @@
             font-size: 16px;
             border-radius: 5px;
             cursor: pointer;
-            margin: 10px 0;
+        }
+        button.show {
+            display: inline-block;
+        }
+        .link-button {
+            margin-top: 10px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
         }
         footer {
             margin-top: 20px;
             font-size: 14px;
             color: #555;
+        }
+        #error-message {
+            color: red;
+            display: none;
+        }
+        .report-button {
+            background-color: #ff0000; /* Red color for the report button */
+            margin-top: 10px;
+            padding: 5px 10px; /* Smaller size */
+            font-size: 14px; /* Smaller font size */
+            border-radius: 3px;
+            cursor: pointer;
+            position: absolute;
+            bottom: 20px;
         }
     </style>
 </head>
@@ -51,24 +85,108 @@
     <div class="container">
         <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image">
         <h1>Video Anda Sedia!</h1>
-        <p>Klik butang di bawah untuk mendapatkan video anda.</p>
-        <button onclick="getFile()">Get File</button>
-        <p id="file-info"></p>
+        <div id="countdown"></div>
+        <button id="get-file" onclick="redirectToTelegram()">Dapatkan Video</button>
+        <a href="https://t.me/kakifilem" class="link-button">Join Channel</a>
+        <p id="error-message"></p>
     </div>
-
+    <button class="report-button" onclick="reportIssue()">Report Issue</button>
     <footer>
-        © Aman 2024
+        © Kakifilem 2024
     </footer>
-
     <script>
-        function getFile() {
-            const fileInfo = document.getElementById('file-info');
+        function startCountdown() {
+            const countdownElement = document.getElementById('countdown');
+            const getFileButton = document.getElementById('get-file');
+            let seconds = 4;
+            countdownElement.textContent = `Tolong tunggu ${seconds} saat...`;
+            let interval = setInterval(() => {
+                seconds--;
+                if (seconds <= 0) {
+                    clearInterval(interval);
+                    countdownElement.textContent = "";
+                    getFileButton.classList.add('show');
+                } else {
+                    countdownElement.textContent = `Tolong tunggu ${seconds} saat...`;
+                }
+            }, 1000);
+        }
 
-            // Simulated file fetching logic
-            const fileName = "example-video.mp4";
-            const fileUrl = `https://example.com/files/${fileName}`;
+        function redirectToTelegram() {
+            const getFileButton = document.getElementById('get-file');
+            const errorMessage = document.getElementById('error-message');
+            const urlParams = new URLSearchParams(window.location.search);
+            const token = urlParams.get('token');
+            const videoName = urlParams.get('videoName'); // Ensure videoName is fetched
+            if (token && videoName) {
+                const telegramLink = `https://t.me/Requestfilemv3_bot?start=${encodeURIComponent(token)}`;
+                console.log(`Sending token to: ${telegramLink}`);
+                window.open(telegramLink, '_blank', 'noopener,noreferrer');
+                getFileButton.textContent = "Sudah Dihantar";
+                errorMessage.style.display = "none"; // Hide the error message if successful
+            } else {
+                alert("No token or video name found in URL");
+            }
+        }
 
-            fileInfo.innerHTML = `Your file is ready: <a href="${fileUrl}" target="_blank">${fileName}</a>`;
+        function reportIssue() {
+            const errorMessage = document.getElementById('error-message');
+            const urlParams = new URLSearchParams(window.location.search);
+            const token = urlParams.get('token');
+            const videoName = urlParams.get('videoName'); // Get video name from URL parameter
+            if (!videoName) {
+                alert("No video name found in URL");
+                return;
+            }
+            const reportMessage = `Report issue for video: ${videoName}, with token: ${token}`;
+            fetch('http://localhost:5000/report', { // Use the correct URL for your Flask app
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message: reportMessage })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === "success") {
+                    errorMessage.textContent = "Issue reported successfully.";
+                } else {
+                    errorMessage.textContent = "Failed to report issue.";
+                }
+                errorMessage.style.display = "block";
+            })
+            .catch(error => {
+                errorMessage.textContent = "Error reporting issue.";
+                errorMessage.style.display = "block";
+                console.error('Error:', error);
+            });
+        }
+
+        function setCookie(name, value, days) {
+            const d = new Date();
+            d.setTime(d.getTime() + (days * 24 * 60 * 60 * 1000));
+            const expires = "expires=" + d.toUTCString();
+            document.cookie = name + "=" + value + ";" + expires + ";path=/";
+        }
+
+        function getCookie(name) {
+            const nameEQ = name + "=";
+            const ca = document.cookie.split(';');
+            for (let i = 0; i < ca.length; i++) {
+                let c = ca[i];
+                while (c.charAt(0) == ' ') {
+                    c = c.substring(1);
+                }
+                if (c.indexOf(nameEQ) == 0) {
+                    return c.substring(nameEQ.length, c.length);
+                }
+            }
+            return null;
+        }
+
+        // Start the countdown on page load
+        window.onload = () => {
+            startCountdown();
         }
     </script>
 </body>
