@@ -130,7 +130,6 @@
         }
 
         function reportIssue() {
-            const errorMessage = document.getElementById('error-message');
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
             const videoName = urlParams.get('videoName'); // Get video name from URL parameter
