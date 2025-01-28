@@ -130,37 +130,39 @@
         }
 
         function reportIssue() {
+            const errorMessage = document.getElementById('error-message');
             const urlParams = new URLSearchParams(window.location.search);
+            const token = urlParams.get('token');
             const videoName = urlParams.get('videoName'); // Get video name from URL parameter
             if (!videoName) {
                 alert("No video name found in URL");
                 return;
             }
-            // Redirect to your Telegram group
-            const groupLink = `https://t.me/KakifilemReport`;
-            window.open(groupLink, '_blank', 'noopener,noreferrer');
-        }
-
-        function setCookie(name, value, days) {
-            const d = new Date();
-            d.setTime(d.getTime() + (days * 24 * 60 * 60 * 1000));
-            const expires = "expires=" + d.toUTCString();
-            document.cookie = name + "=" + value + ";" + expires + ";path=/";
-        }
-
-        function getCookie(name) {
-            const nameEQ = name + "=";
-            const ca = document.cookie.split(';');
-            for (let i = 0; i < ca.length; i++) {
-                let c = ca[i];
-                while (c.charAt(0) == ' ') {
-                    c = c.substring(1);
+            const reportMessage = `Report issue for video: ${videoName}, with token: ${token}`;
+            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { // Use the Telegram Bot API
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    chat_id: GROUP_CHAT_ID,
+                    text: `New report received: ${reportMessage}`
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.ok) {
+                    errorMessage.textContent = "Issue reported successfully.";
+                } else {
+                    errorMessage.textContent = "Failed to report issue.";
                 }
-                if (c.indexOf(nameEQ) == 0) {
-                    return c.substring(nameEQ.length, c.length);
-                }
-            }
-            return null;
+                errorMessage.style.display = "block";
+            })
+            .catch(error => {
+                errorMessage.textContent = "Error reporting issue.";
+                errorMessage.style.display = "block";
+                console.error('Error:', error);
+            });
         }
 
         // Start the countdown on page load
