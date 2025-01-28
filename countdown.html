@@ -26,6 +26,11 @@
         h1 {
             color: #007bff;
         }
+        img {
+            max-width: 100%;
+            height: auto;
+            margin-bottom: 20px;
+        }
         #countdown {
             font-size: 20px;
             margin: 20px 0;
@@ -78,6 +83,7 @@
 </head>
 <body>
     <div class="container">
+        <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image">
         <h1>Video Anda Sedia!</h1>
         <div id="countdown"></div>
         <button id="get-file" onclick="redirectToTelegram()">Dapatkan Video</button>
@@ -124,36 +130,15 @@
         }
 
         function reportIssue() {
-            const errorMessage = document.getElementById('error-message');
             const urlParams = new URLSearchParams(window.location.search);
-            const token = urlParams.get('token');
             const videoName = urlParams.get('videoName'); // Get video name from URL parameter
             if (!videoName) {
                 alert("No video name found in URL");
                 return;
             }
-            const reportMessage = `Report issue for video: ${videoName}, with token: ${token}`;
-            fetch('http://localhost:5000/report', { // Use the correct URL for your Flask app
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ message: reportMessage })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === "success") {
-                    errorMessage.textContent = "Issue reported successfully.";
-                } else {
-                    errorMessage.textContent = "Failed to report issue.";
-                }
-                errorMessage.style.display = "block";
-            })
-            .catch(error => {
-                errorMessage.textContent = "Error reporting issue.";
-                errorMessage.style.display = "block";
-                console.error('Error:', error);
-            });
+            // Redirect to your Telegram group
+            const groupLink = `https://t.me/KakifilemReport`;
+            window.open(groupLink, '_blank', 'noopener,noreferrer');
         }
 
         function setCookie(name, value, days) {
