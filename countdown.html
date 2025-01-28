@@ -139,30 +139,13 @@
                 return;
             }
             const reportMessage = `Report issue for video: ${videoName}, with token: ${token}`;
-            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, { // Use the Telegram Bot API
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    chat_id: GROUP_CHAT_ID,
-                    text: `New report received: ${reportMessage}`
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.ok) {
-                    errorMessage.textContent = "Issue reported successfully.";
-                } else {
-                    errorMessage.textContent = "Failed to report issue.";
-                }
-                errorMessage.style.display = "block";
-            })
-            .catch(error => {
-                errorMessage.textContent = "Error reporting issue.";
-                errorMessage.style.display = "block";
-                console.error('Error:', error);
-            });
+            // Save report message in localStorage
+            localStorage.setItem('reportMessage', reportMessage);
+            // Redirect to your Telegram group
+            const groupLink = `https://t.me/KakifilemReport`;
+            window.open(groupLink, '_blank', 'noopener,noreferrer');
+            // Show instructions for sending report message
+            alert("Please join the group and send the following message: " + reportMessage);
         }
 
         // Start the countdown on page load
