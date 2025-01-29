@@ -1,4 +1,4 @@
 worker: python telegram_bot.py
-web: python report.py
+web: python Report.py
 
 
