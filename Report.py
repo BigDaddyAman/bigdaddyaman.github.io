@@ -56,7 +56,7 @@ def report():
         return jsonify({"status": "error", "message": "No message found"}), 400
 
 def start_flask_app():
-    app.run(host='0.0.0.0', port=8000)
+    app.run(host='0.0.0.0', port=8080)
 
 # Define the start command handler for the bot
 async def start(update: Update, context: CallbackContext) -> None:
