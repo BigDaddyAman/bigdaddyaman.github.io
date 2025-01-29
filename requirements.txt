@@ -1,0 +1,6 @@
+asyncio
+telethon
+psycopg2
+flask
+python-telegram-bot
+flask-cors
