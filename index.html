@@ -26,6 +26,11 @@
         h1 {
             color: #007bff;
         }
+        img {
+            max-width: 100%;
+            height: auto;
+            margin-bottom: 20px;
+        }
         button {
             background-color: #007bff;
             color: #fff;
@@ -34,7 +39,6 @@
             font-size: 16px;
             border-radius: 5px;
             cursor: pointer;
-            margin-top: 10px; /* Add margin for spacing between buttons */
         }
         footer {
             margin-top: 20px;
@@ -45,10 +49,10 @@
 </head>
 <body>
     <div class="container">
+        <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image">
         <h1>Selamat Datang!</h1>
         <p>Klik butang di bawah untuk mendapatkan pautan video anda.</p>
         <button onclick="redirectToCountdown()">Dapatkan Pautan</button>
-        <button onclick="joinChannel()">Join Channel</button> <!-- Add Join Channel button -->
     </div>
 
     <footer>
@@ -66,11 +70,6 @@
             } else {
                 alert("No token or video name found in URL");
             }
-        }
-
-        function joinChannel() {
-            const channelUrl = "https://example.com/join-channel"; // Replace with your channel URL
-            window.location.href = channelUrl;
         }
     </script>
 </body>
