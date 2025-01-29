@@ -4,3 +4,4 @@ psycopg2
 flask
 python-telegram-bot
 flask-cors
+python-dotenv
