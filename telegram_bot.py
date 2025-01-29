@@ -10,15 +10,20 @@ import base64
 import time
 import threading
 from Report import start_flask_app  # Import the Flask app starter function
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levellevel)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Your API ID, hash, and bot token obtained from https://my.telegram.org and BotFather
-api_id = 24492108  # Your new API ID
-api_hash = '82342323c63f78f9b0bc7a3ecd7c2509'  # Your new API hash
-bot_token = '7303681517:AAFQg_QXYScFJNeub-Cp8qmB7IIUNn_9E5M'  # Your new bot token
+api_id = int(os.getenv('API_ID'))  # Convert to int
+api_hash = os.getenv('API_HASH')
+bot_token = os.getenv('BOT_TOKEN')
 
 client = TelegramClient('bot', api_id, api_hash).start(bot_token=bot_token)
 
@@ -28,11 +33,11 @@ def connect_to_db():
     while retries > 0:
         try:
             conn = psycopg2.connect(
-                dbname='Kakifilem',
-                user='postgres',
-                password='Amanfiy77',
-                host='localhost',
-                port='5432'
+                dbname=os.getenv('DB_NAME'),
+                user=os.getenv('DB_USER'),
+                password=os.getenv('DB_PASSWORD'),
+                host=os.getenv('DB_HOST'),
+                port=os.getenv('DB_PORT')
             )
             return conn
         except psycopg2.OperationalError as e:
@@ -57,6 +62,9 @@ c_verification = conn_verification.cursor()
 c_verification.execute('''CREATE TABLE IF NOT EXISTS tokens
              (token TEXT PRIMARY KEY, file_id TEXT)''')
 conn_verification.commit()
+
+# Start the Flask app in a separate thread
+threading.Thread(target=start_flask_app).start()
 
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
 
