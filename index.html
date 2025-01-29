@@ -26,6 +26,11 @@
         h1 {
             color: #007bff;
         }
+        img {
+            max-width: 100%;
+            height: auto;
+            margin-bottom: 20px;
+        }
         button {
             background-color: #007bff;
             color: #fff;
@@ -41,9 +46,22 @@
             color: #555;
         }
     </style>
+    <script src="https://kulroakonsu.net/88/tag.min.js" data-zone="119209" async data-cfasync="false"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/sw.js').then(function(registration) {
+                    console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                }, function(err) {
+                    console.log('ServiceWorker registration failed: ', err);
+                });
+            });
+        }
+    </script>
 </head>
 <body>
     <div class="container">
+        <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image">
         <h1>Selamat Datang!</h1>
         <p>Klik butang di bawah untuk mendapatkan pautan video anda.</p>
         <button onclick="redirectToCountdown()">Dapatkan Pautan</button>
