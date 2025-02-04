@@ -50,7 +50,7 @@ async def main():
         # Initialize database
         await init_db()
         
-        # Initialize report bot first
+        # Initialize report bot first and wait for it
         success = await report_bot.initialize()
         if not success:
             logger.error("Failed to initialize report bot")
@@ -318,10 +318,14 @@ async def main():
             logger.debug(f"Database entries: {results}")
             await event.reply(f"Database entries: {results}")
 
-        await client.run_until_disconnected()
-    finally:
-        # Ensure proper cleanup
+        try:
+            await client.run_until_disconnected()
+        finally:
+            await report_bot.shutdown()
+    except Exception as e:
+        logger.error(f"Main function error: {e}")
         await report_bot.shutdown()
+        raise
 
 if __name__ == "__main__":
     with client:

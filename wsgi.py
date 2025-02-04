@@ -1,6 +1,6 @@
-from Report import create_app  # Import the create_app function
+from Report import create_app  
 
-app = create_app()  # Create the Flask app instance
+app = create_app()  
 
 if __name__ == "__main__":
-    app.run()  # This allows running the app directly (not needed for Gunicorn)
+    app.run()  
