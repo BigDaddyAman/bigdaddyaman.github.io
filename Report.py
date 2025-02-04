@@ -33,7 +33,8 @@ class ReportBot:
         self.app.route('/report', methods=['POST'])(self.handle_report)
         self.application = None
         self.app_task = None
-        self.loop = None
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
         
         # Make sure Flask app listens on correct port
         self.port = int(os.environ.get("PORT", 5000))
@@ -42,13 +43,7 @@ class ReportBot:
     async def initialize(self):
         if not self.initialized:
             try:
-                # Get or create event loop
-                try:
-                    self.loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    self.loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(self.loop)
-
+                # Use the existing event loop
                 report_token = os.getenv('REPORT_BOT_TOKEN')
                 if not report_token:
                     logger.error("REPORT_BOT_TOKEN not found")
@@ -57,8 +52,12 @@ class ReportBot:
                 self.group_id = int(os.getenv('GROUP_CHAT_ID'))
                 self.report_bot = Bot(token=report_token)
                 
-                # Initialize application with explicit event loop
-                self.application = ApplicationBuilder().token(report_token).build()
+                # Initialize application
+                self.application = (ApplicationBuilder()
+                    .token(report_token)
+                    .read_timeout(30)
+                    .write_timeout(30)
+                    .build())
                 
                 # Add handlers
                 self.application.add_handler(CommandHandler("start", self.handle_start_command))
@@ -67,9 +66,9 @@ class ReportBot:
                 # Initialize the application
                 await self.application.initialize()
                 
-                # Start polling in the background
+                # Start polling in a task
                 self.app_task = self.loop.create_task(
-                    self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+                    self.application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
                 )
                 
                 # Test connection
@@ -77,8 +76,11 @@ class ReportBot:
                 logger.info(f"Report bot initialized: @{me.username}")
                 self.initialized = True
                 return True
+
             except Exception as e:
                 logger.error(f"Report bot initialization error: {e}")
+                if self.app_task and not self.app_task.done():
+                    self.app_task.cancel()
                 if self.application:
                     try:
                         await self.application.shutdown()
