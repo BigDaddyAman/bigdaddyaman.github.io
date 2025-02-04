@@ -34,8 +34,8 @@ class ReportBot:
         self.application = None
         
         # Make sure Flask app listens on correct port
-        port = int(os.getenv('PORT', 5000))
-        self.port = port
+        self.port = int(os.environ.get("PORT", 5000))
+        self.app.config['SERVER_NAME'] = f"0.0.0.0:{self.port}"
 
     async def initialize(self):
         if not self.initialized:
@@ -147,4 +147,7 @@ def start_flask_app():
 
 def create_app():
     """Function for gunicorn"""
+    if os.getenv('RAILWAY_ENVIRONMENT'):
+        # Ensure app is configured for Railway
+        report_bot.app.config['SERVER_NAME'] = None  # Let Gunicorn handle this
     return report_bot.app
