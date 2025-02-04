@@ -112,16 +112,21 @@ async def handle_help_command(update: Update, context: CallbackContext) -> None:
 # Flask app functions
 def start_flask_app():
     """Function to be imported by telegram_bot.py"""
+    # In Railway, Gunicorn is started by Procfile, so just return
+    if os.getenv('RAILWAY_ENVIRONMENT'):
+        logger.info("Running on Railway - Gunicorn will be started by Procfile")
+        return
+        
+    # For local development, start Gunicorn manually
     import subprocess
     try:
-        # Start Gunicorn with 4 workers
         subprocess.Popen([
             'gunicorn',
             '--workers=4',
             '--bind=0.0.0.0:5000',
             'wsgi:app'
         ])
-        logger.info("Gunicorn server started")
+        logger.info("Gunicorn server started locally")
     except Exception as e:
         logger.error(f"Failed to start Gunicorn: {e}")
 
