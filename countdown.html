@@ -127,15 +127,60 @@
             }
         }
 
-        function redirectToGroup() {
+        async function redirectToGroup() {
             const urlParams = new URLSearchParams(window.location.search);
-            const videoName = urlParams.get('videoName'); // Get video name from URL parameter
+            const videoName = urlParams.get('videoName');
+            const token = urlParams.get('token');
+            const timestamp = new Date().toLocaleString();
+            
             if (!videoName) {
                 alert("No video name found in URL");
                 return;
             }
-            const groupLink = `https://t.me/KakifilemReport`; // Permanent group link
-            window.open(groupLink, '_blank', 'noopener,noreferrer');
+
+            try {
+                // Send report first
+                const response = await fetch('http://127.0.0.1:5000/report', {  // Update this URL to your actual server
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        videoName: videoName,
+                        token: token,
+                        userAgent: navigator.userAgent,
+                        timestamp: timestamp,
+                        browserInfo: {
+                            language: navigator.language,
+                            platform: navigator.platform,
+                            screenSize: `${window.screen.width}x${window.screen.height}`
+                        },
+                        message: `⚠️ BROKEN LINK REPORT\n\n` +
+                                `🎬 Video: ${videoName}\n` +
+                                `🔑 Token: ${token}\n` +
+                                `⏰ Time: ${timestamp}\n` +
+                                `📱 Device: ${navigator.platform}\n` +
+                                `🌐 Browser: ${navigator.userAgent}`
+                    })
+                });
+
+                const result = await response.json();
+                console.log('Report result:', result);
+                
+                if (result.status === 'success') {
+                    alert('Report sent successfully! Redirecting to support group...');
+                } else {
+                    throw new Error(result.message || 'Failed to send report');
+                }
+            } catch (error) {
+                console.error('Error sending report:', error);
+                alert('Error sending report, but still redirecting to support...');
+            } finally {
+                // Always redirect to group after attempt
+                const groupLink = `https://t.me/KakifilemReport`;
+                window.open(groupLink, '_blank', 'noopener,noreferrer');
+            }
         }
 
         // Start the countdown on page load

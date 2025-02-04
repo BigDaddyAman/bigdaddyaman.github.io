@@ -7,81 +7,129 @@ import threading
 import asyncio
 from dotenv import load_dotenv
 import os
+from datetime import datetime
 
-# Load environment variables from .env file
+# Load environment variables first
 load_dotenv()
 
-# Enable logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize the bot with environment variables
-TOKEN = os.getenv('BOT_TOKEN')
-GROUP_CHAT_ID = int(os.getenv('GROUP_CHAT_ID'))
-bot = Bot(token=TOKEN)
+class ReportBot:
+    def __init__(self):
+        self.report_bot = None
+        self.group_id = None
+        self.initialized = False
+        self.app = Flask(__name__)
+        CORS(self.app, resources={
+            r"/report": {
+                "origins": ["*"],
+                "methods": ["POST"],
+                "allow_headers": ["Content-Type", "Accept"],
+            }
+        })
+        
+        # Register routes
+        self.app.route('/report', methods=['POST'])(self.handle_report)
 
-# Initialize Flask app
-app = Flask(__name__)
-CORS(app)  # Enable CORS for the app
+    async def initialize(self):
+        if not self.initialized:
+            try:
+                report_token = os.getenv('REPORT_BOT_TOKEN')
+                if not report_token:
+                    logger.error("REPORT_BOT_TOKEN not found")
+                    return False
 
-# Ensure there's an existing event loop to use
-try:
-    loop = asyncio.get_event_loop()
-except RuntimeError as e:
-    if 'There is no current event loop in thread' in str(e):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+                self.group_id = int(os.getenv('GROUP_CHAT_ID'))
+                self.report_bot = Bot(token=report_token)
+                
+                # Test connection
+                me = await self.report_bot.get_me()
+                logger.info(f"Report bot initialized: @{me.username}")
+                self.initialized = True
+                return True
+            except Exception as e:
+                logger.error(f"Report bot initialization error: {e}")
+                return False
+        return True
 
-async def send_report_message(message):
-    try:
-        logger.info(f"Attempting to send message to group: {message}")
-        await bot.send_message(chat_id=GROUP_CHAT_ID, text=f"New report received: {message}")
-        logger.info("Message sent successfully to the group.")
-    except Exception as e:
-        logger.error(f"Failed to send message to group: {e}")
+    # Modified handle_report to work with async
+    async def handle_report(self):
+        if request.method == 'POST':
+            try:
+                data = request.json
+                logger.info(f"Received report: {data}")
+                
+                if not await self.send_report(data):
+                    return jsonify({"status": "error", "message": "Failed to send report"}), 500
+                    
+                return jsonify({"status": "success", "message": "Report sent"}), 200
+            except Exception as e:
+                logger.error(f"Error handling report: {e}")
+                return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route('/report', methods=['POST'])
-def report():
-    data = request.json
-    message = data.get('message')
-    if message:
-        logger.info(f"Received report: {message}")
-        asyncio.run_coroutine_threadsafe(send_report_message(message), loop)
-        return jsonify({"status": "success", "message": "Report sent"}), 200
-    else:
-        logger.warning("No message found in the request.")
-        return jsonify({"status": "error", "message": "No message found"}), 400
+    async def send_report(self, data):
+        if not await self.initialize():
+            return False
 
+        try:
+            message = (
+                "⚠️ BROKEN LINK REPORT ⚠️\n\n"
+                f"🎬 Video: {data.get('videoName', 'Unknown')}\n"
+                f"🔑 Token: {data.get('token', 'Not provided')}\n"
+                f"⏰ Time: {data.get('timestamp', 'Unknown')}\n"
+                f"📱 Device: {data.get('browserInfo', {}).get('platform', 'Unknown')}\n"
+                f"🌐 Browser: {data.get('userAgent', 'Unknown')}"
+            )
+
+            await self.report_bot.send_message(
+                chat_id=self.group_id,
+                text=message
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send report: {e}")
+            return False
+
+# Create single instance
+report_bot = ReportBot()
+
+# Define command handlers first
+async def handle_start_command(update: Update, context: CallbackContext) -> None:
+    user = update.effective_user
+    logger.info(f"Received /start command from user {user.id}")
+    await update.message.reply_text(
+        f'Hello {user.first_name}! I am the report bot for Kakifilem. '
+        'I handle user reports about broken video links.'
+    )
+
+async def handle_help_command(update: Update, context: CallbackContext) -> None:
+    await update.message.reply_text(
+        'You can report broken links through our website. '
+        'I will notify the admin team immediately.'
+    )
+
+# Flask app functions
 def start_flask_app():
-    app.run(host='0.0.0.0', port=8080)
+    """Function to be imported by telegram_bot.py"""
+    import subprocess
+    try:
+        # Start Gunicorn with 4 workers
+        subprocess.Popen([
+            'gunicorn',
+            '--workers=4',
+            '--bind=0.0.0.0:5000',
+            'wsgi:app'
+        ])
+        logger.info("Gunicorn server started")
+    except Exception as e:
+        logger.error(f"Failed to start Gunicorn: {e}")
 
-# Define the start command handler for the bot
-async def start(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text('Hi! I am your reporting bot. Send me reports here or through the website.')
+def create_app():
+    """Function for gunicorn"""
+    return report_bot.app
 
-# Define a handler for any text message
-async def handle_message(update: Update, context: CallbackContext) -> None:
-    text = update.message.text
-    await update.message.reply_text(f'Received your message: {text}')
-
-def main() -> None:
-    # Start Flask app in a separate thread
-    threading.Thread(target=start_flask_app).start()
-
-    # Create the Application and pass it your bot's token
-    application = ApplicationBuilder().token(TOKEN).build()
-
-    # Register the /start command handler
-    application.add_handler(CommandHandler("start", start))
-
-    # Register a message handler for any text message
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Start the Bot
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
+# Create application and add handlers after defining them
+app = ApplicationBuilder().token(os.getenv('REPORT_BOT_TOKEN')).build()
+app.add_handler(CommandHandler("start", handle_start_command))
+app.add_handler(CommandHandler("help", handle_help_command))

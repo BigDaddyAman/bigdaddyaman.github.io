@@ -1,17 +1,20 @@
 import logging
-import psycopg2
-import asyncio
-import re
-import math
 from telethon import TelegramClient, events, Button
 from telethon.tl.types import Document, DocumentAttributeFilename
 import uuid
+import re
+import math  # Add this import
 import base64
-import time
 import threading
-from Report import start_flask_app  # Import the Flask app starter function
+from Report import start_flask_app, report_bot  # Import the report_bot instance
 from dotenv import load_dotenv
 import os
+import asyncio
+from database import (
+    init_db, store_file_metadata, store_token,
+    get_file_by_id, get_file_by_token, search_files, count_search_results,
+    AsyncPostgresConnection  # Fixed import name
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -20,68 +23,14 @@ load_dotenv()
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Your API ID, hash, and bot token obtained from https://my.telegram.org and BotFather
+# Your API ID, hash, and bot token
 api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
 
 client = TelegramClient('bot', api_id, api_hash).start(bot_token=bot_token)
 
-# Connect to PostgreSQL database with retry mechanism
-def connect_to_db():
-    retries = 5
-    while retries > 0:
-        try:
-            conn = psycopg2.connect(
-                dbname=os.getenv('PGDATABASE'),
-                user=os.getenv('PGUSER'),
-                password=os.getenv('PGPASSWORD'),
-                host=os.getenv('PGHOST'),
-                port=os.getenv('PGPORT')
-            )
-            return conn
-        except psycopg2.OperationalError as e:
-            logger.error(f"Database connection failed: {e}")
-            retries -= 1
-            time.sleep(5)
-    raise Exception("Failed to connect to the database after multiple retries")
-
-conn = connect_to_db()
-c = conn.cursor()
-
-# Ensure the table to store file metadata exists
-c.execute('''CREATE TABLE IF NOT EXISTS files
-             (id TEXT PRIMARY KEY, access_hash TEXT, file_reference BYTEA, mime_type TEXT, caption TEXT, keywords TEXT, file_name TEXT)''')
-conn.commit()
-
-# Connect to verification database with retry mechanism
-conn_verification = connect_to_db()
-c_verification = conn_verification.cursor()
-
-# Ensure the table to store tokens exists
-c_verification.execute('''CREATE TABLE IF NOT EXISTS tokens
-             (token TEXT PRIMARY KEY, file_id TEXT)''')
-conn_verification.commit()
-
-# Start the Flask app in a separate thread
-threading.Thread(target=start_flask_app).start()
-
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
-
-def store_video_metadata(id, access_hash, file_reference, mime_type, caption, keywords, file_name):
-    cursor = conn.cursor()
-    cursor.execute('''INSERT INTO files (id, access_hash, file_reference, mime_type, caption, keywords, file_name)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s)''',
-                   (id, access_hash, file_reference, mime_type, caption, keywords, file_name))
-    conn.commit()
-
-def generate_and_store_token(file_id):
-    token = str(uuid.uuid4())  # Generate a unique token
-    encoded_token = base64.urlsafe_b64encode(token.encode()).decode()
-    cursor_verification = conn_verification.cursor()
-    cursor_verification.execute('INSERT INTO tokens (token, file_id) VALUES (%s, %s)', (encoded_token, file_id))
-    conn_verification.commit()
-    return encoded_token
 
 # List of authorized user IDs
 AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and future moderator IDs
@@ -97,8 +46,19 @@ def split_keywords(keyword):
     return keyword.split()
 
 async def main():
+    # Initialize database
+    await init_db()
+    
+    # Initialize report bot first
+    await report_bot.initialize()
+    
+    # Start Flask app for report bot in a separate thread
+    threading.Thread(target=start_flask_app, daemon=True).start()
+    logger.info("Report bot server started")
+    
+    # Start main bot
     await client.start()
-    logger.info("Client created")
+    logger.info("Main bot created")
 
     @client.on(events.NewMessage(pattern='/start'))
     async def start(event):
@@ -109,22 +69,22 @@ async def main():
                 decoded_token = base64.urlsafe_b64decode(token.encode()).decode()
                 logger.debug(f"Decoded token: {decoded_token}")
 
-                cursor_verification = conn_verification.cursor()
-                cursor_verification.execute('SELECT file_id FROM tokens WHERE token=%s', (token,))
-                result = cursor_verification.fetchone()
+                result = await get_file_by_token(token)
                 logger.debug(f"Token verification result: {result}")
 
                 if result:
-                    file_id = result[0]
+                    file_id = result
 
-                    cursor_files = conn.cursor()
-                    cursor_files.execute('SELECT id, access_hash, file_reference, mime_type, caption, file_name FROM files WHERE id=%s', (file_id,))
-                    file_info = cursor_files.fetchone()
-
+                    file_info = await get_file_by_id(file_id)
                     logger.debug(f"File fetch result: {file_info}")
 
                     if file_info:
-                        id, access_hash, file_reference, mime_type, caption, file_name = file_info
+                        # Note: asyncpg returns Record object, access by key
+                        id = file_info['id']
+                        access_hash = file_info['access_hash']
+                        file_reference = file_info['file_reference']
+                        mime_type = file_info['mime_type']
+                        file_name = file_info['file_name']
 
                         formatted_caption = file_name.replace(" ", ".").replace("@", "")
 
@@ -191,23 +151,14 @@ async def main():
                     logger.debug(f"File Name: {file_name}")
                     logger.debug(f"Mime Type: {document.mime_type}")
 
-                    id = document.id
-                    access_hash = document.access_hash
+                    # Convert id and access_hash to strings before storing
+                    id = str(document.id)
+                    access_hash = str(document.access_hash)
                     file_reference = document.file_reference
                     mime_type = document.mime_type
 
                     logger.debug(f"Inserting file metadata: id={id}, access_hash={access_hash}, file_reference={file_reference}, mime_type={mime_type}, caption={caption}, keywords={keywords}, file_name={file_name}")
-                    c.execute('''INSERT INTO files (id, access_hash, file_reference, mime_type, caption, keywords, file_name)
-                                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                 ON CONFLICT (id) DO UPDATE SET
-                                 access_hash = EXCLUDED.access_hash,
-                                 file_reference = EXCLUDED.file_reference,
-                                 mime_type = EXCLUDED.mime_type,
-                                 caption = EXCLUDED.caption,
-                                 keywords = EXCLUDED.keywords,
-                                 file_name = EXCLUDED.file_name''',
-                              (id, access_hash, file_reference, mime_type, caption, keywords, file_name))
-                    conn.commit()
+                    await store_file_metadata(id, access_hash, file_reference, mime_type, caption, keywords, file_name)
                     await event.reply('File metadata stored.')
                 except Exception as e:
                     logger.error(f"Error handling document message: {e}")
@@ -227,18 +178,10 @@ async def main():
                     page_size = 10  # Number of results per page
                     offset = (page - 1) * page_size
 
-                    search_query = "SELECT id, caption, file_name FROM files WHERE "
-                    search_query += " AND ".join(["keywords LIKE %s"] * len(keyword_list))
-                    search_query += " LIMIT %s OFFSET %s"
-
-                    search_params = [f'%{kw}%' for kw in keyword_list] + [page_size, offset]
-
-                    c.execute(search_query, search_params)
-                    db_results = c.fetchall()
+                    db_results = await search_files(keyword_list, page_size, offset)
                     logger.debug(f"Database search results for keywords '{keyword_list}': {db_results}")
 
-                    c.execute("SELECT COUNT(*) FROM files WHERE " + " AND ".join(["keywords LIKE %s"] * len(keyword_list)), [f'%{kw}%' for kw in keyword_list])
-                    total_results = c.fetchone()[0]
+                    total_results = await count_search_results(keyword_list)
                     total_pages = math.ceil(total_results / page_size)
 
                     video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
@@ -298,18 +241,10 @@ async def main():
 
                 keyword_list = split_keywords(keyword)
 
-                search_query = "SELECT id, caption, file_name FROM files WHERE "
-                search_query += " AND ".join(["keywords LIKE %s"] * len(keyword_list))
-                search_query += " LIMIT %s OFFSET %s"
-
-                search_params = [f'%{kw}%' for kw in keyword_list] + [page_size, offset]
-
-                c.execute(search_query, search_params)
-                db_results = c.fetchall()
+                db_results = await search_files(keyword_list, page_size, offset)
                 logger.debug(f"Database search results for keywords '{keyword_list}': {db_results}")
 
-                c.execute("SELECT COUNT(*) FROM files WHERE " + " AND ".join(["keywords LIKE %s"] * len(keyword_list)), [f'%{kw}%' for kw in keyword_list])
-                total_results = c.fetchone()[0]
+                total_results = await count_search_results(keyword_list)
                 total_pages = math.ceil(total_results / page_size)
 
                 video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
@@ -349,15 +284,13 @@ async def main():
                 pass  # Do nothing if the user clicks on the current page
             else:
                 id, current_page = data.split("|")
-                token = generate_and_store_token(id)
+                # Fix: store_token now handles file_id as string
+                token = await store_token(str(id))
                 if token:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT file_name FROM files WHERE id=%s', (id,))
-                    result = cursor.fetchone()
-
+                    result = await get_file_by_id(str(id))
                     if result:
                         import urllib.parse
-                        video_name = result[0]
+                        video_name = result['file_name']
                         safe_video_name = urllib.parse.quote(video_name, safe='')
                         safe_token = urllib.parse.quote(token, safe='')
                         website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
@@ -381,10 +314,8 @@ async def main():
         logger.debug(f"Database entries: {results}")
         await event.reply(f"Database entries: {results}")
 
-    # Start the Flask app in a separate thread
-    threading.Thread(target=start_flask_app).start()
-
     await client.run_until_disconnected()
 
-with client:
-    client.loop.run_until_complete(main())
+if __name__ == "__main__":
+    with client:
+        client.loop.run_until_complete(main())

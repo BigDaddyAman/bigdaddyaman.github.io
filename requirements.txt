@@ -2,6 +2,7 @@ asyncio
 telethon
 psycopg2
 flask
+gunicorn==21.2.0
 python-telegram-bot
 flask-cors
 python-dotenv
