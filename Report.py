@@ -33,8 +33,6 @@ class ReportBot:
         self.app.route('/report', methods=['POST'])(self.handle_report)
         self.application = None
         self.app_task = None
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
         
         # Make sure Flask app listens on correct port
         self.port = int(os.environ.get("PORT", 5000))
@@ -43,7 +41,6 @@ class ReportBot:
     async def initialize(self):
         if not self.initialized:
             try:
-                # Use the existing event loop
                 report_token = os.getenv('REPORT_BOT_TOKEN')
                 if not report_token:
                     logger.error("REPORT_BOT_TOKEN not found")
@@ -53,11 +50,7 @@ class ReportBot:
                 self.report_bot = Bot(token=report_token)
                 
                 # Initialize application
-                self.application = (ApplicationBuilder()
-                    .token(report_token)
-                    .read_timeout(30)
-                    .write_timeout(30)
-                    .build())
+                self.application = ApplicationBuilder().token(report_token).build()
                 
                 # Add handlers
                 self.application.add_handler(CommandHandler("start", self.handle_start_command))
@@ -67,8 +60,8 @@ class ReportBot:
                 await self.application.initialize()
                 
                 # Start polling in a task
-                self.app_task = self.loop.create_task(
-                    self.application.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
+                self.app_task = asyncio.create_task(
+                    self.application.run_polling(allowed_updates=Update.ALL_TYPES)
                 )
                 
                 # Test connection
