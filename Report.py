@@ -32,6 +32,10 @@ class ReportBot:
         # Register routes
         self.app.route('/report', methods=['POST'])(self.handle_report)
         self.application = None
+        
+        # Make sure Flask app listens on correct port
+        port = int(os.getenv('PORT', 5000))
+        self.port = port
 
     async def initialize(self):
         if not self.initialized:
@@ -123,19 +127,21 @@ def start_flask_app():
     """Function to be imported by telegram_bot.py"""
     # In Railway, Gunicorn is started by Procfile, so just return
     if os.getenv('RAILWAY_ENVIRONMENT'):
-        logger.info("Running on Railway - Gunicorn will be started by Procfile")
+        logger.info(f"Running on Railway - Gunicorn will be started by Procfile on port {os.getenv('PORT', 5000)}")
         return
         
     # For local development, start Gunicorn manually
     import subprocess
     try:
+        port = int(os.getenv('PORT', 5000))
         subprocess.Popen([
             'gunicorn',
             '--workers=4',
-            '--bind=0.0.0.0:5000',
-            'wsgi:app'
+            f'--bind=0.0.0.0:{port}',
+            'wsgi:app',
+            '--timeout', '120'
         ])
-        logger.info("Gunicorn server started locally")
+        logger.info(f"Gunicorn started locally on port {port}")
     except Exception as e:
         logger.error(f"Failed to start Gunicorn: {e}")
 
