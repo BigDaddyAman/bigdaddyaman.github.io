@@ -32,6 +32,7 @@ class ReportBot:
         # Register routes
         self.app.route('/report', methods=['POST'])(self.handle_report)
         self.application = None
+        self.app_task = None
         
         # Make sure Flask app listens on correct port
         self.port = int(os.environ.get("PORT", 5000))
@@ -53,8 +54,11 @@ class ReportBot:
                 self.application.add_handler(CommandHandler("start", self.handle_start_command))
                 self.application.add_handler(CommandHandler("help", self.handle_help_command))
                 
-                # Start the bot in the background
-                asyncio.create_task(self.application.run_polling(allowed_updates=Update.ALL_TYPES))
+                # Initialize the application first
+                await self.application.initialize()
+                
+                # Start polling in a separate task
+                self.app_task = asyncio.create_task(self.application.run_polling(allowed_updates=Update.ALL_TYPES))
                 
                 # Test connection
                 me = await self.report_bot.get_me()
@@ -63,8 +67,26 @@ class ReportBot:
                 return True
             except Exception as e:
                 logger.error(f"Report bot initialization error: {e}")
+                if self.application:
+                    try:
+                        await self.application.shutdown()
+                    except Exception as shutdown_error:
+                        logger.error(f"Error shutting down application: {shutdown_error}")
                 return False
         return True
+
+    async def shutdown(self):
+        """Properly shutdown the bot"""
+        if self.initialized:
+            if self.app_task:
+                self.app_task.cancel()
+                try:
+                    await self.app_task
+                except asyncio.CancelledError:
+                    pass
+            if self.application:
+                await self.application.shutdown()
+            self.initialized = False
 
     # Modified handle_report to work with async
     async def handle_report(self):
