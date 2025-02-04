@@ -31,6 +31,7 @@ class ReportBot:
         
         # Register routes
         self.app.route('/report', methods=['POST'])(self.handle_report)
+        self.application = None
 
     async def initialize(self):
         if not self.initialized:
@@ -42,6 +43,14 @@ class ReportBot:
 
                 self.group_id = int(os.getenv('GROUP_CHAT_ID'))
                 self.report_bot = Bot(token=report_token)
+                
+                # Initialize application
+                self.application = ApplicationBuilder().token(report_token).build()
+                self.application.add_handler(CommandHandler("start", self.handle_start_command))
+                self.application.add_handler(CommandHandler("help", self.handle_help_command))
+                
+                # Start the bot in the background
+                asyncio.create_task(self.application.run_polling(allowed_updates=Update.ALL_TYPES))
                 
                 # Test connection
                 me = await self.report_bot.get_me()
@@ -91,23 +100,23 @@ class ReportBot:
             logger.error(f"Failed to send report: {e}")
             return False
 
+    # Move command handlers inside the class
+    async def handle_start_command(self, update: Update, context: CallbackContext) -> None:
+        user = update.effective_user
+        logger.info(f"Received /start command from user {user.id}")
+        await update.message.reply_text(
+            f'Hello {user.first_name}! I am the report bot for Kakifilem. '
+            'I handle user reports about broken video links.'
+        )
+
+    async def handle_help_command(self, update: Update, context: CallbackContext) -> None:
+        await update.message.reply_text(
+            'You can report broken links through our website. '
+            'I will notify the admin team immediately.'
+        )
+
 # Create single instance
 report_bot = ReportBot()
-
-# Define command handlers first
-async def handle_start_command(update: Update, context: CallbackContext) -> None:
-    user = update.effective_user
-    logger.info(f"Received /start command from user {user.id}")
-    await update.message.reply_text(
-        f'Hello {user.first_name}! I am the report bot for Kakifilem. '
-        'I handle user reports about broken video links.'
-    )
-
-async def handle_help_command(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text(
-        'You can report broken links through our website. '
-        'I will notify the admin team immediately.'
-    )
 
 # Flask app functions
 def start_flask_app():
@@ -133,8 +142,3 @@ def start_flask_app():
 def create_app():
     """Function for gunicorn"""
     return report_bot.app
-
-# Create application and add handlers after defining them
-app = ApplicationBuilder().token(os.getenv('REPORT_BOT_TOKEN')).build()
-app.add_handler(CommandHandler("start", handle_start_command))
-app.add_handler(CommandHandler("help", handle_help_command))
