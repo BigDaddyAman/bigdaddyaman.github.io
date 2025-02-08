@@ -134,15 +134,14 @@
             const timestamp = new Date().toLocaleString();
             
             try {
-                const fileId = await getFileIdFromToken(token);
+                const shortToken = token ? `${token.slice(0, 6)}...` : 'Tidak dijumpai';
                 const reportText = 
                     `⚠️ LAPORAN PAUTAN ROSAK\n\n` +
                     `🎬 Video: ${videoName}\n` +
-                    `🔢 ID Fail: ${fileId || 'Tidak dijumpai'}\n` +
                     `⏰ Masa: ${timestamp}\n` +
                     `📱 Peranti: ${navigator.platform}\n` +
                     `🌐 Pelayar: ${navigator.userAgent}\n\n` +
-                    `🔒 Token: (Dihantar secara peribadi kepada admin)`;
+                    `🔑 Token: ${shortToken}`;  // Show partial token
 
                 await navigator.clipboard.writeText(reportText);
                 alert('Laporan telah disalin! Sila tampal dalam kumpulan sokongan. Admin akan menghubungi anda jika perlu.');
