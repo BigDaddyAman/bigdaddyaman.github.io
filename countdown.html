@@ -88,7 +88,7 @@
         <button id="get-file" onclick="redirectToTelegram()">Dapatkan Video</button>
         <a href="https://t.me/kakifilem" class="link-button">Join Channel</a>
         <p>Jika pautan rosak, sila klik butang "Report Issue" di bawah:</p>
-        <button class="report-button" onclick="copyReportAndRedirect()">Report Issue</button>
+        <button class="report-button" onclick="redirectToGroup()">Report Issue</button>
         <p id="error-message"></p>
     </div>
     <footer>
@@ -127,41 +127,34 @@
             }
         }
 
-        async function copyReportAndRedirect() {
+        async function redirectToGroup() {
             const urlParams = new URLSearchParams(window.location.search);
             const videoName = urlParams.get('videoName');
             const token = urlParams.get('token');
             const timestamp = new Date().toLocaleString();
             
-            try {
-                const shortToken = token ? `${token.slice(0, 6)}...` : 'Tidak dijumpai';
-                const reportText = 
-                    `⚠️ LAPORAN PAUTAN ROSAK\n\n` +
-                    `🎬 Video: ${videoName}\n` +
-                    `⏰ Masa: ${timestamp}\n` +
-                    `📱 Peranti: ${navigator.platform}\n` +
-                    `🌐 Pelayar: ${navigator.userAgent}\n\n` +
-                    `🔑 Token: ${shortToken}`;  // Show partial token
-
-                await navigator.clipboard.writeText(reportText);
-                alert('Laporan telah disalin! Sila tampal dalam kumpulan sokongan. Admin akan menghubungi anda jika perlu.');
-            } catch (err) {
-                console.error('Failed to copy:', err);
-                alert('Tidak dapat menyalin laporan secara automatik. Sila screenshot halaman ini dan kongsi dalam kumpulan.');
+            if (!videoName) {
+                alert("No video name found in URL");
+                return;
             }
 
-            const groupLink = `https://t.me/KakifilemReport`;
-            window.open(groupLink, '_blank', 'noopener,noreferrer');
-        }
-
-        // Function to get file ID from token
-        async function getFileIdFromToken(token) {
+            const partialToken = token.slice(0, 4) + "..." + token.slice(-4);  // Show only the first and last 4 characters of the token
+            const reportMessage = `⚠️ BROKEN LINK REPORT ⚠️\n\n` +
+                                  `🎬 Video: ${videoName}\n` +
+                                  `🔑 Token: ${partialToken}\n` +
+                                  `⏰ Time: ${timestamp}\n` +
+                                  `📱 Device: ${navigator.platform}\n` +
+                                  `🌐 Browser: ${navigator.userAgent}`;
+            
             try {
-                // This could be a simple API endpoint that returns just the last 6 digits of file ID
-                return '******' + fileId.slice(-6);  // Mask most of the ID
-            } catch (err) {
-                console.error('Failed to get file ID:', err);
-                return null;
+                await navigator.clipboard.writeText(reportMessage);
+                alert('Report message copied to clipboard! Please paste it in the support group.');
+            } catch (error) {
+                console.error('Error copying report message:', error);
+                alert('Failed to copy report message. Please manually copy the following message:\n\n' + reportMessage);
+            } finally {
+                const groupLink = `https://t.me/KakifilemReport`;
+                window.open(groupLink, '_blank', 'noopener,noreferrer');
             }
         }
 
