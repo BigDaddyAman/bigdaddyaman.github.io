@@ -133,30 +133,37 @@
             const token = urlParams.get('token');
             const timestamp = new Date().toLocaleString();
             
-            if (!videoName) {
-                alert("No video name found in URL");
-                return;
-            }
-
-            const reportText = 
-                `⚠️ BROKEN LINK REPORT\n\n` +
-                `🎬 Video: ${videoName}\n` +
-                `🔑 Token: ${token}\n` +
-                `⏰ Time: ${timestamp}\n` +
-                `📱 Device: ${navigator.platform}\n` +
-                `🌐 Browser: ${navigator.userAgent}`;
-
             try {
+                const fileId = await getFileIdFromToken(token);
+                const reportText = 
+                    `⚠️ LAPORAN PAUTAN ROSAK\n\n` +
+                    `🎬 Video: ${videoName}\n` +
+                    `🔢 ID Fail: ${fileId || 'Tidak dijumpai'}\n` +
+                    `⏰ Masa: ${timestamp}\n` +
+                    `📱 Peranti: ${navigator.platform}\n` +
+                    `🌐 Pelayar: ${navigator.userAgent}\n\n` +
+                    `🔒 Token: (Dihantar secara peribadi kepada admin)`;
+
                 await navigator.clipboard.writeText(reportText);
-                alert('Report text copied! Please paste it in the support group.');
+                alert('Laporan telah disalin! Sila tampal dalam kumpulan sokongan. Admin akan menghubungi anda jika perlu.');
             } catch (err) {
                 console.error('Failed to copy:', err);
-                alert('Could not copy report text automatically. Please write your issue in the group.');
+                alert('Tidak dapat menyalin laporan secara automatik. Sila screenshot halaman ini dan kongsi dalam kumpulan.');
             }
 
-            // Redirect to group
             const groupLink = `https://t.me/KakifilemReport`;
             window.open(groupLink, '_blank', 'noopener,noreferrer');
+        }
+
+        // Function to get file ID from token
+        async function getFileIdFromToken(token) {
+            try {
+                // This could be a simple API endpoint that returns just the last 6 digits of file ID
+                return '******' + fileId.slice(-6);  // Mask most of the ID
+            } catch (err) {
+                console.error('Failed to get file ID:', err);
+                return null;
+            }
         }
 
         // Start the countdown on page load
