@@ -116,45 +116,20 @@
             const getFileButton = document.getElementById('get-file');
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
-            if (token) {
+            const videoName = urlParams.get('videoName'); // Ensure videoName is fetched
+            if (token && videoName) {
                 const telegramLink = `https://t.me/Requestfilemv3_bot?start=${encodeURIComponent(token)}`;
                 console.log(`Sending token to: ${telegramLink}`);
                 window.open(telegramLink, '_blank', 'noopener,noreferrer');
                 getFileButton.textContent = "Sudah Dihantar";
             } else {
-                alert("No token found in URL");
+                alert("No token or video name found in URL");
             }
         }
 
-        async function redirectToGroup() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const videoName = urlParams.get('videoName');
-            const token = urlParams.get('token');
-            const timestamp = new Date().toLocaleString();
-            
-            if (!videoName || !token) {
-                alert("No token or video name found in URL");
-                return;
-            }
-
-            const partialToken = token.slice(0, 4) + "..." + token.slice(-4);  // Show only the first and last 4 characters of the token
-            const reportMessage = `⚠️ BROKEN LINK REPORT ⚠️\n\n` +
-                                  `🎬 Video: ${videoName}\n` +
-                                  `🔑 Token: ${partialToken}\n` +
-                                  `⏰ Time: ${timestamp}\n` +
-                                  `📱 Device: ${navigator.platform}\n` +
-                                  `🌐 Browser: ${navigator.userAgent}`;
-            
-            try {
-                await navigator.clipboard.writeText(reportMessage);
-                alert('Report message copied to clipboard! Please paste it in the support group.');
-            } catch (error) {
-                console.error('Error copying report message:', error);
-                alert('Failed to copy report message. Please manually copy the following message:\n\n' + reportMessage);
-            } finally {
-                const groupLink = `https://t.me/KakifilemReport`;
-                window.open(groupLink, '_blank', 'noopener,noreferrer');
-            }
+        function redirectToGroup() {
+            const groupLink = `https://t.me/KakifilemReport`;
+            window.open(groupLink, '_blank', 'noopener,noreferrer');
         }
 
         // Start the countdown on page load
