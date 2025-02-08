@@ -132,8 +132,8 @@
             const token = urlParams.get('token');
             const timestamp = new Date().toLocaleString();
             
-            if (!videoName) {
-                alert("No video name found in URL");
+            if (!videoName || !token) {
+                alert("No token or video name found in URL");
                 return;
             }
 
