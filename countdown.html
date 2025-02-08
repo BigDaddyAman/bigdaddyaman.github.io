@@ -88,7 +88,7 @@
         <button id="get-file" onclick="redirectToTelegram()">Dapatkan Video</button>
         <a href="https://t.me/kakifilem" class="link-button">Join Channel</a>
         <p>Jika pautan rosak, sila klik butang "Report Issue" di bawah:</p>
-        <button class="report-button" onclick="redirectToGroup()">Report Issue</button>
+        <button class="report-button" onclick="copyReportAndRedirect()">Report Issue</button>
         <p id="error-message"></p>
     </div>
     <footer>
@@ -127,7 +127,7 @@
             }
         }
 
-        async function redirectToGroup() {
+        async function copyReportAndRedirect() {
             const urlParams = new URLSearchParams(window.location.search);
             const videoName = urlParams.get('videoName');
             const token = urlParams.get('token');
@@ -138,42 +138,25 @@
                 return;
             }
 
-            try {
-                // Update this URL to your Railway URL
-                const response = await fetch('https://worker-production-445a.up.railway.app//report', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        videoName: videoName,
-                        token: token,
-                        userAgent: navigator.userAgent,
-                        timestamp: timestamp,
-                        browserInfo: {
-                            language: navigator.language,
-                            platform: navigator.platform,
-                            screenSize: `${window.screen.width}x${window.screen.height}`
-                        }
-                    })
-                });
+            const reportText = 
+                `⚠️ BROKEN LINK REPORT\n\n` +
+                `🎬 Video: ${videoName}\n` +
+                `🔑 Token: ${token}\n` +
+                `⏰ Time: ${timestamp}\n` +
+                `📱 Device: ${navigator.platform}\n` +
+                `🌐 Browser: ${navigator.userAgent}`;
 
-                const result = await response.json();
-                console.log('Report result:', result);
-                
-                if (result.status === 'success') {
-                    alert('Report sent successfully! Redirecting to support group...');
-                } else {
-                    throw new Error(result.message || 'Failed to send report');
-                }
-            } catch (error) {
-                console.error('Error sending report:', error);
-                alert('Error sending report, but still redirecting to support...');
-            } finally {
-                const groupLink = `https://t.me/KakifilemReport`;
-                window.open(groupLink, '_blank', 'noopener,noreferrer');
+            try {
+                await navigator.clipboard.writeText(reportText);
+                alert('Report text copied! Please paste it in the support group.');
+            } catch (err) {
+                console.error('Failed to copy:', err);
+                alert('Could not copy report text automatically. Please write your issue in the group.');
             }
+
+            // Redirect to group
+            const groupLink = `https://t.me/KakifilemReport`;
+            window.open(groupLink, '_blank', 'noopener,noreferrer');
         }
 
         // Start the countdown on page load
