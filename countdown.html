@@ -147,7 +147,11 @@
 
             try {
                 await navigator.clipboard.writeText(reportMessage);
-                alert('Mesej laporan telah disalin ke papan klip! Sila tampal mesej ini dalam kumpulan sokongan di Telegram.');
+                alert('Mesej laporan telah disalin ke papan klip! Sila tampal mesej ini dalam kumpulan sokongan di Telegram.\n\n' +
+                      'Langkah-langkah:\n' +
+                      '1. Klik butang "OK" untuk membuka kumpulan sokongan.\n' +
+                      '2. Tampal mesej yang telah disalin ke dalam kumpulan.\n' +
+                      '3. Hantar mesej tersebut.');
             } catch (error) {
                 console.error('Ralat menyalin mesej laporan:', error);
                 alert('Gagal menyalin mesej laporan, tetapi masih mengalihkan ke sokongan...');
