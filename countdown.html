@@ -134,7 +134,7 @@
             const timestamp = new Date().toLocaleString();
             
             if (!videoName) {
-                alert("No video name found in URL");
+                alert("Tiada nama video dijumpai dalam URL");
                 return;
             }
 
@@ -147,10 +147,10 @@
 
             try {
                 await navigator.clipboard.writeText(reportMessage);
-                alert('Report message copied to clipboard! Redirecting to support group...');
+                alert('Mesej laporan telah disalin ke papan klip! Sila tampal mesej ini dalam kumpulan sokongan.');
             } catch (error) {
-                console.error('Error copying report message:', error);
-                alert('Failed to copy report message, but still redirecting to support...');
+                console.error('Ralat menyalin mesej laporan:', error);
+                alert('Gagal menyalin mesej laporan, tetapi masih mengalihkan ke sokongan...');
             } finally {
                 const groupLink = `https://t.me/KakifilemReport`;
                 window.open(groupLink, '_blank', 'noopener,noreferrer');
