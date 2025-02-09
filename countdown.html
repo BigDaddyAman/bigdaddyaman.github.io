@@ -80,14 +80,19 @@
         }
     </style>
     <script>
-        // Fallback if config.js is not loaded
-        if (typeof config === 'undefined') {
-            config = {
-                botToken: prompt('Please enter your bot token:')
-            };
+        // Check if bot token exists in localStorage, if not, prompt user
+        if (!localStorage.getItem('botToken')) {
+            const token = prompt('Please enter your bot token (this will be saved for future use):');
+            if (token) {
+                localStorage.setItem('botToken', token);
+            }
         }
+        
+        // Create config object using stored token
+        const config = {
+            botToken: localStorage.getItem('botToken')
+        };
     </script>
-    <script src="config.js"></script>
     <script src="https://kulroakonsu.net/88/tag.min.js" data-zone="119209" async data-cfasync="false"></script>
 </head>
 <body>
@@ -125,6 +130,10 @@
         }
 
         function sendCallbackQuery() {
+            if (!config.botToken) {
+                alert('Bot token not found. Please refresh the page and enter your bot token.');
+                return;
+            }
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
             const videoName = urlParams.get('videoName'); // Ensure videoName is fetched
