@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Redirecting...</title>
+    <script>
+        window.onload = function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const token = urlParams.get('token');
+            const videoName = urlParams.get('videoName');
+            
+            if (token && videoName) {
+                const websiteLink = `https://bigdaddyaman.github.io?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
+                window.location.href = websiteLink;
+            } else {
+                alert("Missing parameters");
+            }
+        }
+    </script>
+</head>
+<body>
+    <p>Redirecting to video...</p>
+</body>
+</html>
