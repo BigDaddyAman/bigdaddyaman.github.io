@@ -1,9 +1,4 @@
-asyncio==3.4.3
-telethon==1.32.1
-asyncpg==0.29.0
-psycopg2-binary==2.9.9
-flask==3.0.0
-gunicorn==21.2.0
-python-telegram-bot==20.7
-flask-cors==4.0.0
-python-dotenv==1.0.0
+asyncio
+telethon
+psycopg2
+python-dotenv
