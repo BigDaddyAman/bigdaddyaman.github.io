@@ -49,18 +49,6 @@
     <script src="https://kulroakonsu.net/88/tag.min.js" data-zone="119209" async data-cfasync="false"></script>
     <script src="InPagePush.js" async></script> <!-- Reference to InPagePush.js -->
     <script>
-        // Auto redirect on page load
-        window.onload = function() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const token = urlParams.get('token');
-            const videoName = urlParams.get('videoName');
-            if (token && videoName) {
-                // Auto redirect to countdown page without showing welcome page
-                const countdownLink = `countdown.html?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
-                window.location.href = countdownLink;
-            }
-        }
-        
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
                 navigator.serviceWorker.register('/sw.js').then(function(registration) {
