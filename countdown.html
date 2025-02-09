@@ -127,9 +127,34 @@
             }
         }
 
-        function redirectToGroup() {
-            const groupLink = `https://t.me/KakifilemReport`;
-            window.open(groupLink, '_blank', 'noopener,noreferrer');
+        async function redirectToGroup() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const videoName = urlParams.get('videoName');
+            const token = urlParams.get('token');
+            const timestamp = new Date().toLocaleString();
+            
+            if (!videoName) {
+                alert("No video name found in URL");
+                return;
+            }
+
+            const reportMessage = `⚠️ LAPORAN PAUTAN ROSAK\n\n` +
+                                  `🎬 Video: ${videoName}\n` +
+                                  `⏰ Masa: ${timestamp}\n` +
+                                  `📱 Peranti: ${navigator.platform}\n` +
+                                  `🌐 Pelayar: ${navigator.userAgent}\n` +
+                                  `🔑 Token: ${token}`;
+
+            try {
+                await navigator.clipboard.writeText(reportMessage);
+                alert('Report message copied to clipboard! Redirecting to support group...');
+            } catch (error) {
+                console.error('Error copying report message:', error);
+                alert('Failed to copy report message, but still redirecting to support...');
+            } finally {
+                const groupLink = `https://t.me/KakifilemReport`;
+                window.open(groupLink, '_blank', 'noopener,noreferrer');
+            }
         }
 
         // Start the countdown on page load
