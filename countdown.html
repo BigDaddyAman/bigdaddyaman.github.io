@@ -96,6 +96,10 @@
         © Kakifilem 2024
     </footer>
     <script>
+        // Add global variables for bot token and chat ID
+        const BOT_TOKEN = '7303681517:AAFQg_QXYScFJNeub-Cp8qmB7IIUNn_9E5M';
+        const CHAT_ID = 'YOUR_CHAT_ID'; // Add your chat ID here
+
         function startCountdown() {
             const countdownElement = document.getElementById('countdown');
             const getFileButton = document.getElementById('get-file');
@@ -119,25 +123,41 @@
             const token = urlParams.get('token');
             
             if (token) {
-                // Send POST request to your bot's API endpoint
-                fetch('https://yourapi.domain/send-file', {
+                getFileButton.textContent = "Sedang Memuat...";
+                
+                // First, try the local API endpoint
+                fetch(`http://localhost:8080/send-file`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ token: token })
+                    body: JSON.stringify({ 
+                        token: token,
+                        chat_id: CHAT_ID 
+                    })
                 })
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     if (data.success) {
-                        getFileButton.textContent = "Video sedang dihantar";
+                        getFileButton.textContent = "Video Sedang Dihantar ✓";
+                        // Optionally, disable the button
+                        getFileButton.disabled = true;
                     } else {
-                        getFileButton.textContent = "Gagal menghantar";
+                        throw new Error(data.error || 'Failed to send video');
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    getFileButton.textContent = "Gagal menghantar";
+                    getFileButton.textContent = "Gagal Menghantar";
+                    // Show error message to user
+                    document.getElementById('error-message').style.display = 'block';
+                    document.getElementById('error-message').textContent = 
+                        "Gagal menghantar video. Sila cuba lagi atau report masalah.";
                 });
             } else {
                 alert("Token tidak dijumpai");
