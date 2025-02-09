@@ -79,12 +79,6 @@
             display: inline-block; /* Make the button part of the box */
         }
     </style>
-    <script>
-        // Directly define botToken
-        const config = {
-            botToken: '6761231692:AAEEJm9mH2YD_G_ZjLrwFIU7SEfWyZjKanA'
-        };
-    </script>
     <script src="https://kulroakonsu.net/88/tag.min.js" data-zone="119209" async data-cfasync="false"></script>
 </head>
 <body>
@@ -92,7 +86,7 @@
         <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image">
         <h1>Video Anda Sedia!</h1>
         <div id="countdown"></div>
-        <button id="get-file" onclick="sendCallbackQuery()" disabled>Dapatkan Video</button>
+        <button id="get-file" onclick="redirectToTelegram()" disabled>Dapatkan Video</button>
         <a href="https://t.me/kakifilem" class="link-button">Join Channel</a>
         <p>Jika pautan rosak, sila klik butang "Report Issue" di bawah:</p>
         <button class="report-button" onclick="redirectToGroup()">Report Issue</button>
@@ -102,8 +96,6 @@
         © Kakifilem 2024
     </footer>
     <script>
-        const botToken = '7303681517:AAFQg_QXYScFJNeub-Cp8qmB7IIUNn_9E5M'; // Replace with your actual bot token
-
         function startCountdown() {
             const countdownElement = document.getElementById('countdown');
             const getFileButton = document.getElementById('get-file');
@@ -121,16 +113,34 @@
             }, 1000);
         }
 
-        function sendCallbackQuery() {
+        function redirectToTelegram() {
+            const getFileButton = document.getElementById('get-file');
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
-            const videoName = urlParams.get('videoName');
-            if (token && videoName) {
-                // Instead of using callback query, redirect to Telegram bot with start parameter
-                const telegramBotLink = `https://t.me/Requestfilemv3_bot?start=${token}`;
-                window.location.href = telegramBotLink;
+            
+            if (token) {
+                // Send POST request to your bot's API endpoint
+                fetch('https://yourapi.domain/send-file', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ token: token })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        getFileButton.textContent = "Video sedang dihantar";
+                    } else {
+                        getFileButton.textContent = "Gagal menghantar";
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    getFileButton.textContent = "Gagal menghantar";
+                });
             } else {
-                alert("No token or video name found in URL");
+                alert("Token tidak dijumpai");
             }
         }
 
