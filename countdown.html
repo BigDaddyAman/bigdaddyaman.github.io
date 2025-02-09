@@ -142,9 +142,8 @@
             const token = urlParams.get('token');
             const timestamp = new Date().toLocaleString();
             
-            // Show only first half of the token
-            const halfLength = Math.floor(token.length / 2);
-            const maskedToken = token.substring(0, halfLength) + '...';
+            // Show only first 8 characters of the token
+            const maskedToken = token.substring(0, 8) + '...';
             
             const reportMessage = 
 `⚠️ LAPORAN PAUTAN ROSAK
