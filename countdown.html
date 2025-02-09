@@ -142,6 +142,10 @@
             const token = urlParams.get('token');
             const timestamp = new Date().toLocaleString();
             
+            // Show only first half of the token
+            const halfLength = Math.floor(token.length / 2);
+            const maskedToken = token.substring(0, halfLength) + '...';
+            
             const reportMessage = 
 `⚠️ LAPORAN PAUTAN ROSAK
 
@@ -150,7 +154,7 @@
 📱 Peranti: ${navigator.platform}
 🌐 Pelayar: ${navigator.userAgent}
 
-🔑 Token: ${token}`;
+🔑 Token: ${maskedToken}`;
 
             copyToClipboard(reportMessage);
             
