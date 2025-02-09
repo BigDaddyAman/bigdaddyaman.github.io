@@ -86,7 +86,7 @@
         <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image">
         <h1>Video Anda Sedia!</h1>
         <div id="countdown"></div>
-        <button id="get-file" onclick="redirectToTelegram()" disabled>Dapatkan Video</button>
+        <button id="get-file" onclick="sendCallbackQuery()" disabled>Dapatkan Video</button>
         <a href="https://t.me/kakifilem" class="link-button">Join Channel</a>
         <p>Jika pautan rosak, sila klik butang "Report Issue" di bawah:</p>
         <button class="report-button" onclick="redirectToGroup()">Report Issue</button>
@@ -113,16 +113,31 @@
             }, 1000);
         }
 
-        function redirectToTelegram() {
-            const getFileButton = document.getElementById('get-file');
+        function sendCallbackQuery() {
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
             const videoName = urlParams.get('videoName'); // Ensure videoName is fetched
             if (token && videoName) {
-                const telegramLink = `https://t.me/Requestfilemv3_bot?start=${encodeURIComponent(token)}`;
-                console.log(`Sending token to: ${telegramLink}`);
-                window.open(telegramLink, '_blank', 'noopener,noreferrer');
-                getFileButton.textContent = "Sudah Dihantar";
+                const callbackData = `${token}|${videoName}`;
+                // Send callback query to the bot
+                fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        callback_query_id: callbackData,
+                        text: 'Sending file...'
+                    })
+                }).then(response => {
+                    if (response.ok) {
+                        console.log('Callback query sent successfully');
+                    } else {
+                        console.error('Failed to send callback query');
+                    }
+                }).catch(error => {
+                    console.error('Error sending callback query:', error);
+                });
             } else {
                 alert("No token or video name found in URL");
             }
