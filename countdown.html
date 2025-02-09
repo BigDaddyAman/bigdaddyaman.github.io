@@ -79,6 +79,15 @@
             display: inline-block; /* Make the button part of the box */
         }
     </style>
+    <script>
+        // Fallback if config.js is not loaded
+        if (typeof config === 'undefined') {
+            config = {
+                botToken: prompt('Please enter your bot token:')
+            };
+        }
+    </script>
+    <script src="config.js"></script>
     <script src="https://kulroakonsu.net/88/tag.min.js" data-zone="119209" async data-cfasync="false"></script>
 </head>
 <body>
@@ -122,7 +131,7 @@
             if (token && videoName) {
                 const callbackData = `${token}|${videoName}`;
                 // Send callback query to the bot
-                fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+                fetch(`https://api.telegram.org/bot${config.botToken}/answerCallbackQuery`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
