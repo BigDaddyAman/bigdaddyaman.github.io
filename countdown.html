@@ -44,8 +44,9 @@
             border-radius: 5px;
             cursor: pointer;
         }
-        button.show {
-            display: inline-block;
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
         }
         .link-button {
             margin-top: 10px;
@@ -85,7 +86,7 @@
         <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image">
         <h1>Video Anda Sedia!</h1>
         <div id="countdown"></div>
-        <button id="get-file" onclick="redirectToTelegram()">Dapatkan Video</button>
+        <button id="get-file" onclick="redirectToTelegram()" disabled>Dapatkan Video</button>
         <a href="https://t.me/kakifilem" class="link-button">Join Channel</a>
         <p>Jika pautan rosak, sila klik butang "Report Issue" di bawah:</p>
         <button class="report-button" onclick="redirectToGroup()">Report Issue</button>
@@ -105,7 +106,7 @@
                 if (seconds <= 0) {
                     clearInterval(interval);
                     countdownElement.textContent = "";
-                    getFileButton.classList.add('show');
+                    getFileButton.disabled = false;
                 } else {
                     countdownElement.textContent = `Tolong tunggu ${seconds} saat...`;
                 }
