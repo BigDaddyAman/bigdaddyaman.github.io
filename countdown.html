@@ -80,17 +80,9 @@
         }
     </style>
     <script>
-        // Check if bot token exists in localStorage, if not, prompt user
-        if (!localStorage.getItem('botToken')) {
-            const token = prompt('Please enter your bot token (this will be saved for future use):');
-            if (token) {
-                localStorage.setItem('botToken', token);
-            }
-        }
-        
-        // Create config object using stored token
+        // Directly define botToken
         const config = {
-            botToken: localStorage.getItem('botToken')
+            botToken: '6761231692:AAEEJm9mH2YD_G_ZjLrwFIU7SEfWyZjKanA'
         };
     </script>
     <script src="https://kulroakonsu.net/88/tag.min.js" data-zone="119209" async data-cfasync="false"></script>
@@ -130,34 +122,13 @@
         }
 
         function sendCallbackQuery() {
-            if (!config.botToken) {
-                alert('Bot token not found. Please refresh the page and enter your bot token.');
-                return;
-            }
             const urlParams = new URLSearchParams(window.location.search);
             const token = urlParams.get('token');
-            const videoName = urlParams.get('videoName'); // Ensure videoName is fetched
+            const videoName = urlParams.get('videoName');
             if (token && videoName) {
-                const callbackData = `${token}|${videoName}`;
-                // Send callback query to the bot
-                fetch(`https://api.telegram.org/bot${config.botToken}/answerCallbackQuery`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        callback_query_id: callbackData,
-                        text: 'Sending file...'
-                    })
-                }).then(response => {
-                    if (response.ok) {
-                        console.log('Callback query sent successfully');
-                    } else {
-                        console.error('Failed to send callback query');
-                    }
-                }).catch(error => {
-                    console.error('Error sending callback query:', error);
-                });
+                // Instead of using callback query, redirect to Telegram bot with start parameter
+                const telegramBotLink = `https://t.me/Requestfilemv3_bot?start=${token}`;
+                window.location.href = telegramBotLink;
             } else {
                 alert("No token or video name found in URL");
             }
