@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>Redirecting...</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>
         window.onload = function() {
             const urlParams = new URLSearchParams(window.location.search);
@@ -9,15 +10,15 @@
             const videoName = urlParams.get('videoName');
             
             if (token && videoName) {
-                const websiteLink = `https://bigdaddyaman.github.io?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
-                window.location.href = websiteLink;
+                // Redirect to your main page with parameters
+                window.location.href = `https://bigdaddyaman.github.io/index.html?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
             } else {
-                alert("Missing parameters");
+                window.location.href = 'https://bigdaddyaman.github.io';
             }
         }
     </script>
 </head>
 <body>
-    <p>Redirecting to video...</p>
+    <p>Redirecting...</p>
 </body>
 </html>
