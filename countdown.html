@@ -127,45 +127,44 @@
             }
         }
 
-        async function redirectToGroup() {
+        function copyToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+        }
+
+        function redirectToGroup() {
             const urlParams = new URLSearchParams(window.location.search);
             const videoName = urlParams.get('videoName');
             const token = urlParams.get('token');
             const timestamp = new Date().toLocaleString();
             
-            if (!videoName) {
-                alert("Tiada nama video dijumpai dalam URL");
-                return;
-            }
+            const reportMessage = 
+`⚠️ LAPORAN PAUTAN ROSAK
 
-            const reportMessage = `⚠️ LAPORAN PAUTAN ROSAK\n\n` +
-                                `🎬 Video: ${videoName}\n` +
-                                `⏰ Masa: ${timestamp}\n` +
-                                `📱 Peranti: ${navigator.platform}\n` +
-                                `🌐 Pelayar: ${navigator.userAgent}\n` +
-                                `🔑 Token: ${token}`;
+🎬 Video: ${videoName}
+⏰ Masa: ${timestamp}
+📱 Peranti: ${navigator.platform}
+🌐 Pelayar: ${navigator.userAgent}
 
-            // Show instructions first
-            const userConfirmed = confirm(
-                "🚨 PANDUAN LAPORAN PAUTAN ROSAK 🚨\n\n" +
-                "1️⃣ Mesej laporan akan disalin secara automatik\n" +
-                "2️⃣ Selepas klik OK, anda akan dibawa ke kumpulan Telegram\n" +
-                "3️⃣ Tampal (CTRL+V) mesej dalam kumpulan tersebut\n" +
-                "4️⃣ Hantar mesej untuk melaporkan pautan rosak\n\n" +
-                "Tekan OK untuk meneruskan..."
+🔑 Token: ${token}`;
+
+            copyToClipboard(reportMessage);
+            
+            alert(
+                "✨ Mesej laporan telah disalin!\n\n" +
+                "Sila ikuti langkah-langkah ini:\n\n" +
+                "1️⃣ Klik 'OK' untuk pergi ke kumpulan support\n" +
+                "2️⃣ Tampal (CTRL+V) mesej laporan dalam kumpulan\n" +
+                "3️⃣ Admin akan membantu anda secepat mungkin\n\n" +
+                "Terima kasih atas kesabaran anda! 🙏"
             );
 
-            if (userConfirmed) {
-                try {
-                    await navigator.clipboard.writeText(reportMessage);
-                    alert("✅ Mesej telah disalin! Sila tampal (CTRL+V) dalam kumpulan Telegram.");
-                    const groupLink = `https://t.me/KakifilemReport`;
-                    window.open(groupLink, '_blank', 'noopener,noreferrer');
-                } catch (error) {
-                    console.error('Ralat menyalin mesej laporan:', error);
-                    alert('❌ Gagal menyalin mesej laporan, sila salin secara manual:\n\n' + reportMessage);
-                }
-            }
+            const groupLink = `https://t.me/KakifilemReport`;
+            window.open(groupLink, '_blank', 'noopener,noreferrer');
         }
 
         // Start the countdown on page load
