@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
-            font-family: Arial, sans-serif;
-            background-color: #e6e6fa; /* Light purple background */
-            color: #333;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            color: #fff;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -17,66 +17,137 @@
         }
         .container {
             text-align: center;
-            background-color: rgba(255, 255, 255, 0.8);
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            max-width: 90%;
+            width: 400px;
+            position: relative;
+            overflow: hidden;
+        }
+        .container::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
+            animation: rotate 20s linear infinite;
+            z-index: -1;
+        }
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
         }
         h1 {
-            color: #007bff;
+            color: #4ff;
+            text-shadow: 0 0 10px rgba(0,255,255,0.5);
+            margin-bottom: 20px;
+            font-size: 28px;
         }
         img {
-            max-width: 100%;
+            max-width: 150px;
             height: auto;
             margin-bottom: 20px;
+            border-radius: 50%;
+            box-shadow: 0 0 20px rgba(79, 255, 255, 0.3);
+            transition: transform 0.3s ease;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 20px rgba(79, 255, 255, 0.3); }
+            50% { transform: scale(1.05); box-shadow: 0 0 30px rgba(79, 255, 255, 0.5); }
+            100% { transform: scale(1); box-shadow: 0 0 20px rgba(79, 255, 255, 0.3); }
         }
         #countdown {
-            font-size: 20px;
+            font-size: 48px;
+            font-weight: bold;
             margin: 20px 0;
-            color: #ff0000;
+            background: linear-gradient(45deg, #4ff, #4f9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 10px rgba(79, 255, 255, 0.3);
+            animation: glow 1s ease-in-out infinite alternate;
+        }
+        @keyframes glow {
+            from { filter: drop-shadow(0 0 5px rgba(79, 255, 255, 0.6)); }
+            to { filter: drop-shadow(0 0 15px rgba(79, 255, 255, 0.8)); }
         }
         button {
-            background-color: #007bff;
-            color: #fff;
+            background: linear-gradient(45deg, #4ff, #4f9);
+            color: #1a1a2e;
             border: none;
-            padding: 10px 20px;
-            font-size: 16px;
-            border-radius: 5px;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 30px;
             cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin: 10px 0;
+            position: relative;
+            overflow: hidden;
+        }
+        button::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: rgba(255,255,255,0.2);
+            transform: rotate(45deg);
+            transition: 0.5s;
+            animation: buttonGlow 2s linear infinite;
+        }
+        @keyframes buttonGlow {
+            0% { transform: translateX(-100%) rotate(45deg); }
+            100% { transform: translateX(100%) rotate(45deg); }
         }
         button:disabled {
-            background-color: #cccccc;
+            background: linear-gradient(45deg, #ccc, #999);
             cursor: not-allowed;
+            transform: none;
+        }
+        button:not(:disabled):hover {
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0 10px 20px rgba(79, 255, 255, 0.4);
         }
         .link-button {
-            margin-top: 10px;
-            background-color: #007bff;
-            color: #fff;
-            border: none;
+            background: linear-gradient(45deg, #4ff, #06f);
+            margin-top: 15px;
+        }
+        .report-button {
+            background: linear-gradient(45deg, #f44, #f04);
+            font-size: 14px;
             padding: 10px 20px;
-            font-size: 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
         }
         footer {
             margin-top: 20px;
             font-size: 14px;
-            color: #555;
+            color: #4ff;
+            opacity: 0.7;
+            text-shadow: 0 0 5px rgba(79, 255, 255, 0.5);
         }
-        #error-message {
-            color: red;
-            display: none;
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255,255,255,0.1);
+            position: absolute;
+            bottom: 0;
+            left: 0;
         }
-        .report-button {
-            background-color: #ff0000; /* Red color for the report button */
-            margin-top: 10px;
-            padding: 5px 10px; /* Smaller size */
-            font-size: 14px; /* Smaller font size */
-            border-radius: 3px;
-            cursor: pointer;
-            display: inline-block; /* Make the button part of the box */
+        .progress {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #4ff, #4f9);
+            transition: width 1s linear;
+            box-shadow: 0 0 10px rgba(79, 255, 255, 0.5);
         }
     </style>
     <script src="https://kulroakonsu.net/88/tag.min.js" data-zone="119209" async data-cfasync="false"></script>
@@ -87,10 +158,12 @@
         <h1>Video Anda Sedia!</h1>
         <div id="countdown"></div>
         <button id="get-file" onclick="redirectToTelegram()" disabled>Dapatkan Video</button>
-        <a href="https://t.me/kakifilem" class="link-button">Join Channel</a>
-        <p>Jika pautan rosak, sila klik butang "Report Issue" di bawah:</p>
+        <a href="https://t.me/kakifilem" class="link-button button">Join Channel</a>
+        <p>Jika pautan rosak, sila klik butang di bawah:</p>
         <button class="report-button" onclick="redirectToGroup()">Report Issue</button>
-        <p id="error-message"></p>
+        <div class="progress-bar">
+            <div class="progress" id="progress"></div>
+        </div>
     </div>
     <footer>
         © Kakifilem 2024
@@ -99,20 +172,26 @@
         function startCountdown() {
             const countdownElement = document.getElementById('countdown');
             const getFileButton = document.getElementById('get-file');
+            const progressBar = document.getElementById('progress');
             let seconds = 4;
-            countdownElement.textContent = `Tolong tunggu ${seconds} saat...`;
+            
+            countdownElement.textContent = seconds;
+            progressBar.style.width = '0%';
+            
             let interval = setInterval(() => {
                 seconds--;
+                countdownElement.textContent = seconds;
+                progressBar.style.width = ((4 - seconds) / 4 * 100) + '%';
+                
                 if (seconds <= 0) {
                     clearInterval(interval);
-                    countdownElement.textContent = "";
+                    countdownElement.style.display = "none";
                     getFileButton.disabled = false;
-                } else {
-                    countdownElement.textContent = `Tolong tunggu ${seconds} saat...`;
+                    progressBar.style.width = '100%';
                 }
             }, 1000);
         }
-
+        
         function redirectToTelegram() {
             const getFileButton = document.getElementById('get-file');
             const urlParams = new URLSearchParams(window.location.search);
