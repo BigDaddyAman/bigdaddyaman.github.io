@@ -391,7 +391,7 @@ async def main():
                             logger.error(f"Error sending file to premium user: {e}")
                             await progress_msg.edit('⚠️ Failed to send file. Please try again or contact support.')
                     else:
-                        # Free users get website link without additional prompt
+                        # Free users get website link - direct open without confirmation
                         token = await store_token(str(id))
                         if token:
                             video_name = file_info['file_name']
@@ -399,7 +399,9 @@ async def main():
                             safe_video_name = urllib.parse.quote(video_name, safe='')
                             safe_token = urllib.parse.quote(token, safe='')
                             website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                            await event.answer(url=website_link)  # This will open the link directly
+                            # Use new message with URL button instead of answer
+                            buttons = [[Button.url("🎬 Download Movie", website_link)]]
+                            await event.edit("Choose download option:", buttons=buttons)
                         else:
                             await event.respond("Failed to generate download link.")
 
