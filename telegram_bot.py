@@ -244,17 +244,16 @@ async def main():
                     if video_results:
                         header = f"{total_results} Results for '{text}'"
                         buttons = []
-                        for id, caption, file_name in video_results:
+                        for result in video_results:
+                            id, caption, file_name, rank = result  # Unpack all 4 values
                             token = await store_token(str(id))
                             if token:
                                 import urllib.parse
                                 safe_video_name = urllib.parse.quote(file_name, safe='')
                                 safe_token = urllib.parse.quote(token, safe='')
                                 if await is_premium(event.sender_id):
-                                    # Premium users get inline button
                                     buttons.append([Button.inline(file_name or caption or "Unknown File", f"{id}|{page}")])
                                 else:
-                                    # Free users get direct website link button
                                     website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
                                     buttons.append([Button.url(file_name or caption or "Unknown File", website_link)])
                         
@@ -315,10 +314,10 @@ async def main():
 
                 if video_results:
                     header = f"{total_results} Results for '{keyword}'"
-                    buttons = [
-                        [Button.inline(file_name or caption or "Unknown File", f"{id}|{page}")]
-                        for id, caption, file_name in video_results
-                    ]
+                    buttons = []
+                    for result in video_results:
+                        id, caption, file_name, rank = result  # Unpack all 4 values
+                        buttons.append([Button.inline(file_name or caption or "Unknown File", f"{id}|{page}")])
                     logger.debug(f"Generated buttons: {buttons}")
 
                     # Pagination Buttons
@@ -632,4 +631,5 @@ async def main():
 if __name__ == "__main__":
     with client:
         client.loop.run_until_complete(main())
+``` 
 
