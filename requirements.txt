@@ -1,0 +1,6 @@
+asyncio
+telethon
+psycopg2
+python-dotenv
+asyncpg
+aiohttp
