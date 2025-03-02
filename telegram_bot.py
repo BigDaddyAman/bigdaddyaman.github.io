@@ -25,7 +25,11 @@ from premium import init_premium_db, is_premium, add_or_renew_premium, get_premi
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 # Your API ID, hash, and bot token
@@ -56,10 +60,12 @@ def split_keywords(keyword):
 # Add this helper function before the main() function
 async def is_user_in_channel(client, user_id):
     try:
-        participant = await client.get_participants(REQUIRED_CHANNEL, filter=lambda x: x.id == user_id)
-        return bool(participant)
+        channel = await client.get_entity(REQUIRED_CHANNEL)
+        # Only check if user can view messages instead of getting participants
+        await client.get_permissions(channel, user_id)
+        return True
     except Exception as e:
-        logger.error(f"Error checking channel membership: {e}")
+        logger.info(f"Channel membership check failed for user {user_id}")
         return False
 
 async def main():
@@ -347,10 +353,8 @@ async def main():
                     await event.respond("File not found.")
                     return
 
-                is_user_premium = await is_premium(user_id)
-                
-                if is_user_premium:
-                    buttons = []  # Premium users get direct download button
+                if await is_premium(user_id):
+                    # Premium users get direct file
                     document = Document(
                         id=int(file_info['id']),
                         access_hash=int(file_info['access_hash']),
@@ -364,7 +368,7 @@ async def main():
 
                     try:
                         progress_msg = await event.respond("🎖 Premium user detected! Preparing your file...")
-                        await asyncio.sleep(1.5)  # 1.5 second delay
+                        await asyncio.sleep(1.5)
                         
                         await client.send_file(
                             event.sender_id,
@@ -376,19 +380,22 @@ async def main():
                         logger.error(f"Error sending file to premium user: {e}")
                         await progress_msg.edit('⚠️ Failed to send file. Please try again or contact support.')
                 else:
-                    # For free users, update buttons with website link
+                    # Free users get website link
                     token = await store_token(str(id))
                     if token:
-                        import urllib.parse
                         video_name = file_info['file_name']
+                        import urllib.parse
                         safe_video_name = urllib.parse.quote(video_name, safe='')
                         safe_token = urllib.parse.quote(token, safe='')
                         website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
                         buttons = [[Button.url("🎬 Download Movie", website_link)]]
-                        await event.edit("Choose download option:", buttons=buttons)
+                        await event.edit(
+                            "Choose download option:",
+                            buttons=buttons
+                        )
                     else:
                         await event.respond("Failed to generate download link.")
-                        
+
         except Exception as e:
             logger.error(f"Error in callback query handler: {e}")
             await event.respond('Failed to process your request.')
@@ -625,3 +632,4 @@ async def main():
 if __name__ == "__main__":
     with client:
         client.loop.run_until_complete(main())
+
