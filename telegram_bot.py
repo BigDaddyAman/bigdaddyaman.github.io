@@ -40,6 +40,9 @@ VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wm
 # List of authorized user IDs
 AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and future moderator IDs
 
+# Add this constant near the top with other constants
+REQUIRED_CHANNEL = "@kakifilem"  # or "https://t.me/kakifilem"
+
 def normalize_keyword(keyword):
     # Replace special characters with spaces, convert to lowercase, and trim whitespace
     keyword = re.sub(r'[\.\_\@\(\)\-]', ' ', keyword).lower()
@@ -49,6 +52,15 @@ def normalize_keyword(keyword):
 def split_keywords(keyword):
     # Split the normalized keyword into individual words
     return keyword.split()
+
+# Add this helper function before the main() function
+async def is_user_in_channel(client, user_id):
+    try:
+        participant = await client.get_participants(REQUIRED_CHANNEL, filter=lambda x: x.id == user_id)
+        return bool(participant)
+    except Exception as e:
+        logger.error(f"Error checking channel membership: {e}")
+        return False
 
 async def main():
     # Initialize database
@@ -60,8 +72,22 @@ async def main():
     await client.start()
     logger.info("Main bot created")
 
+    # Modify the start function
     @client.on(events.NewMessage(pattern='/start'))
     async def start(event):
+        # Check channel membership first
+        if not await is_user_in_channel(client, event.sender_id):
+            keyboard = [
+                [Button.url("Join Channel", f"https://t.me/kakifilem")]
+            ]
+            await event.reply(
+                "⚠️ Welcome! You must join our channel first to use this bot!\n\n"
+                "1. Click the button below to join\n"
+                "2. After joining, come back and send /start again",
+                buttons=keyboard
+            )
+            return
+
         user = event.sender
         await add_user(
             user_id=user.id,
@@ -129,10 +155,24 @@ async def main():
             await event.respond('Hantar movies apa yang anda mahu.')
             logger.warning("No token provided.")
 
+    # Modify the handle_messages function
     @client.on(events.NewMessage)
     async def handle_messages(event):
-        await update_user_activity(event.sender_id)
         if event.is_private:
+            # Check channel membership first
+            if not await is_user_in_channel(client, event.sender_id):
+                keyboard = [
+                    [Button.url("Join Channel", f"https://t.me/kakifilem")]
+                ]
+                await event.reply(
+                    "⚠️ You must join our channel first to use this bot!\n\n"
+                    "1. Click the button below to join\n"
+                    "2. After joining, come back and try again",
+                    buttons=keyboard
+                )
+                return
+
+            await update_user_activity(event.sender_id)
             if event.message.document:
                 try:
                     user_id = event.message.sender_id
@@ -336,7 +376,7 @@ async def main():
                         logger.error(f"Error sending file to premium user: {e}")
                         await progress_msg.edit('⚠️ Failed to send file. Please try again or contact support.')
                 else:
-                    # For free users, generate website link
+                    # For free users, update buttons with website link
                     token = await store_token(str(id))
                     if token:
                         import urllib.parse
@@ -344,12 +384,8 @@ async def main():
                         safe_video_name = urllib.parse.quote(video_name, safe='')
                         safe_token = urllib.parse.quote(token, safe='')
                         website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                        await event.respond(
-                            "📥 Download your file:\n\n"
-                            f"🔗 {website_link}\n\n"
-                            "💎 Want instant downloads? Get premium access!\n"
-                            "Contact @YourAdminUsername for details."
-                        )
+                        buttons = [[Button.url("🎬 Download Movie", website_link)]]
+                        await event.edit("Choose download option:", buttons=buttons)
                     else:
                         await event.respond("Failed to generate download link.")
                         
