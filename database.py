@@ -164,7 +164,7 @@ async def get_file_by_id(file_id: str) -> Optional[Tuple]:
             logger.error(f"Database error while fetching file: {e}")
             return None
 
-# Modify search_files to use the GIN index
+# Modify search_files to prioritize exact matches and limit results
 async def search_files(keyword_list: List[str], page_size: int, offset: int):
     conn = await connect_to_db()
     if not conn:
