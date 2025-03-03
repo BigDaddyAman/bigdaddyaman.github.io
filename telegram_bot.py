@@ -72,7 +72,11 @@ async def is_user_in_channel(client, user_id):
 @client.on(events.NewMessage)
 async def error_handler(event):
     try:
+        # Your existing event handling code here
+        # ...
         raise events.StopPropagation
+    except events.StopPropagation:
+        pass  # Stop propagation is expected, do nothing
     except Exception as e:
         logger.error(f"Uncaught error: {str(e)}", exc_info=True)
 
@@ -173,7 +177,6 @@ async def main():
                 await event.respond('Hantar movies apa yang anda mahu.')
                 logger.warning("No token provided.")
 
-        # Modify the handle_messages function
         @client.on(events.NewMessage)
         async def handle_messages(event):
             if event.is_private:
@@ -643,10 +646,15 @@ async def main():
 
 if __name__ == "__main__":
     try:
+        # Delete the session file if it exists
+        session_file = 'bot.session'
+        if os.path.exists(session_file):
+            os.remove(session_file)
+            logger.info(f"Deleted session file: {session_file}")
+
         with client:
             client.loop.run_until_complete(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}", exc_info=True)
-
