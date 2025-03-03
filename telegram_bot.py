@@ -61,11 +61,10 @@ def split_keywords(keyword):
 async def is_user_in_channel(client, user_id):
     try:
         channel = await client.get_entity(REQUIRED_CHANNEL)
-        # Only check if user can view messages instead of getting participants
-        await client.get_permissions(channel, user_id)
-        return True
+        participant = await client.get_participant(channel, user_id)
+        return participant is not None
     except Exception as e:
-        logger.info(f"Channel membership check failed for user {user_id}")
+        logger.info(f"Channel membership check failed for user {user_id}: {e}")
         return False
 
 # Add error handler for the client
