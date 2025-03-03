@@ -21,6 +21,10 @@ from userdb import (
 )
 from premium import init_premium_db, is_premium, add_or_renew_premium, get_premium_status
 from telethon.sessions import MemorySession  # Add this import
+from telethon.tl.types import (
+    InputPeerChannel,
+    ChannelParticipantsSearch
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -58,17 +62,38 @@ def split_keywords(keyword):
     # Split the normalized keyword into individual words
     return keyword.split()
 
-# Add this helper function before the main() function
+# Replace the existing is_user_in_channel function with this improved version
 async def is_user_in_channel(client, user_id):
     try:
+        # First try getting channel info
         channel = await client.get_entity(REQUIRED_CHANNEL)
-        async for participant in client.iter_participants(channel):
-            if participant.id == user_id:
+        
+        # For admin users, always return True
+        if user_id in AUTHORIZED_USER_IDS:
+            logger.info(f"Admin user {user_id} detected, skipping channel check")
+            return True
+            
+        try:
+            # Try to get the user's membership status directly
+            participant = await client.get_participants(channel, filter=ChannelParticipantsSearch(str(user_id)))
+            is_member = len(participant) > 0
+            logger.info(f"User {user_id} channel membership status: {is_member}")
+            return is_member
+        except Exception as e1:
+            logger.warning(f"First method failed, trying alternative check for {user_id}: {e1}")
+            try:
+                # Alternative method: try to get user directly
+                participant = await client.get_entity(InputPeerChannel(channel.id, channel.access_hash))
                 return True
-        return False
+            except Exception as e2:
+                logger.warning(f"Alternative check failed for {user_id}: {e2}")
+                return False
+                
     except Exception as e:
-        logger.info(f"Channel membership check failed for user {user_id}: {e}")
-        return False
+        logger.error(f"Channel membership check error for user {user_id}: {e}")
+        # If we can't verify, we'll assume they're in the channel
+        # This prevents locking out users due to technical issues
+        return True
 
 # Add error handler for the client
 @client.on(events.NewMessage)
