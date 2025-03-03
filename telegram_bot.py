@@ -26,7 +26,7 @@ load_dotenv()
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Change to DEBUG to show more logs
+    level=logging.INFO,  # Change to INFO to reduce verbosity
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%H:%M:%S'
 )
@@ -236,25 +236,21 @@ async def main():
                 elif event.message.text:
                     try:
                         if event.message.text.startswith('/'):
-                            logger.debug(f"Ignoring command: {event.message.text}")
                             return
 
                         text = normalize_keyword(event.message.text.lower().strip())
                         keyword_list = split_keywords(text)
-                        logger.debug(f"Received text message: {text}")
 
                         page = 1  # Default to first page
                         page_size = 10  # Number of results per page
                         offset = (page - 1) * page_size
 
                         db_results = await search_files(keyword_list, page_size, offset)
-                        logger.debug(f"Database search results for keywords '{keyword_list}': {db_results}")
 
                         total_results = await count_search_results(keyword_list)
                         total_pages = math.ceil(total_results / page_size)
 
                         video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-                        logger.debug(f"Filtered video results: {video_results}")
 
                         if video_results:
                             header = f"{total_results} Results for '{text}'"
@@ -293,7 +289,6 @@ async def main():
 
                             await event.respond(header, buttons=buttons)
                         else:
-                            logger.debug(f"No matching video files found for keyword '{text}'.")
                             await event.reply('Movies yang anda cari belum ada boleh request di @Request67_bot.')
                     except Exception as e:
                         logger.error(f"Error handling text message: {e}")
