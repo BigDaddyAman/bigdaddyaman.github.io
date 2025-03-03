@@ -20,6 +20,7 @@ from userdb import (
     get_user_count, update_user_activity, get_active_users_count
 )
 from premium import init_premium_db, is_premium, add_or_renew_premium, get_premium_status
+from telethon.sessions import MemorySession  # Add this import
 
 # Load environment variables from .env file
 load_dotenv()
@@ -37,7 +38,7 @@ api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
 
-client = TelegramClient('bot', api_id, api_hash).start(bot_token=bot_token)
+client = TelegramClient(MemorySession(), api_id, api_hash).start(bot_token=bot_token)
 
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
 
