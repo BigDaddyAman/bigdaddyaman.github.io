@@ -61,8 +61,10 @@ def split_keywords(keyword):
 async def is_user_in_channel(client, user_id):
     try:
         channel = await client.get_entity(REQUIRED_CHANNEL)
-        participant = await client.get_participant(channel, user_id)
-        return participant is not None
+        async for participant in client.iter_participants(channel):
+            if participant.id == user_id:
+                return True
+        return False
     except Exception as e:
         logger.info(f"Channel membership check failed for user {user_id}: {e}")
         return False
