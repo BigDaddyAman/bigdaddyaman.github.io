@@ -49,8 +49,8 @@ VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wm
 # List of authorized user IDs
 AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and future moderator IDs
 
-# Add this constant near the top with other constants
-REQUIRED_CHANNEL = "@kakifilem"  # or "https://t.me/kakifilem"
+# Update the channel constant
+REQUIRED_CHANNEL = -1001457047091  # Numeric channel ID for more reliable checks
 
 def normalize_keyword(keyword):
     # Replace special characters with spaces, convert to lowercase, and trim whitespace
@@ -70,46 +70,30 @@ async def is_user_in_channel(client, user_id):
             logger.info(f"Admin user {user_id} detected, skipping channel check")
             return True
 
-        # Get channel entity
         try:
+            # Use the numeric channel ID for more reliable checks
             channel = await client.get_entity(REQUIRED_CHANNEL)
-        except Exception as e:
-            logger.error(f"Could not get channel entity: {e}")
-            return True  # Allow access if channel check fails
+            if not channel:
+                logger.error("Could not get channel entity")
+                return False
 
-        try:
-            # Method 1: Try to get participant directly using get_participants
-            participants = await client.get_participants(
-                channel,
-                filter=ChannelParticipantsSearch(str(user_id))
-            )
-            is_member = any(p.id == user_id for p in participants)
-            logger.info(f"User {user_id} channel membership status: {is_member}")
-            return is_member
-            
-        except Exception as e:
-            logger.warning(f"Primary check failed for user {user_id}: {e}")
-            
+            # Try to get participant info directly using get_participants
             try:
-                # Method 2: Alternative check using get_entity
-                user = await client.get_entity(user_id)
-                if not user:
-                    return False
-                    
-                # Try to get participants with username if available
-                if user.username:
-                    participants = await client.get_participants(
-                        channel,
-                        search=user.username
-                    )
-                    is_member = any(p.id == user_id for p in participants)
-                    logger.info(f"Alternative check for user {user_id}: {is_member}")
-                    return is_member
+                participant = await client.get_participants(
+                    channel,
+                    limit=1,
+                    search=str(user_id)
+                )
+                is_member = len(participant) > 0
+                logger.info(f"User {user_id} channel membership status: {is_member}")
+                return is_member
+            except Exception as e:
+                logger.warning(f"Failed to check membership for user {user_id}: {e}")
                 return False
-                
-            except Exception as e2:
-                logger.error(f"All membership checks failed for user {user_id}: {e2}")
-                return False
+
+        except Exception as e:
+            logger.error(f"Channel lookup failed: {e}")
+            return False
 
     except Exception as e:
         logger.error(f"Critical error in channel membership check for user {user_id}: {e}")
