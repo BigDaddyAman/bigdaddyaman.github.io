@@ -49,8 +49,8 @@ VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wm
 # List of authorized user IDs
 AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and future moderator IDs
 
-# Update the channel constant
-REQUIRED_CHANNEL = -1001457047091  # Numeric channel ID for more reliable checks
+# Update the channel constant to use numeric ID
+REQUIRED_CHANNEL = -1001457047091  # Use the numeric channel ID
 
 def normalize_keyword(keyword):
     # Replace special characters with spaces, convert to lowercase, and trim whitespace
@@ -62,7 +62,23 @@ def split_keywords(keyword):
     # Split the normalized keyword into individual words
     return keyword.split()
 
-# Replace the existing is_user_in_channel function with this improved version
+# Add this function
+async def verify_bot_channel_access():
+    try:
+        channel = await client.get_entity(REQUIRED_CHANNEL)
+        logger.info(f"Successfully connected to channel: {channel.title}")
+        # Test bot's permissions
+        me = await client.get_me()
+        participants = await client.get_participants(channel, filter=ChannelParticipantsSearch(str(me.id)))
+        if not participants:
+            logger.error("Bot is not in the channel!")
+            return False
+        logger.info("Bot has required channel access")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to verify channel access: {e}")
+        return False
+
 async def is_user_in_channel(client, user_id):
     try:
         # Skip check for admin users
@@ -71,32 +87,21 @@ async def is_user_in_channel(client, user_id):
             return True
 
         try:
-            # Use the numeric channel ID for more reliable checks
-            channel = await client.get_entity(REQUIRED_CHANNEL)
-            if not channel:
-                logger.error("Could not get channel entity")
-                return False
-
-            # Try to get participant info directly using get_participants
-            try:
-                participant = await client.get_participants(
-                    channel,
-                    limit=1,
-                    search=str(user_id)
-                )
-                is_member = len(participant) > 0
-                logger.info(f"User {user_id} channel membership status: {is_member}")
-                return is_member
-            except Exception as e:
-                logger.warning(f"Failed to check membership for user {user_id}: {e}")
-                return False
-
+            # Direct check using channel ID
+            participants = await client.get_participants(
+                REQUIRED_CHANNEL,
+                search=str(user_id),
+                limit=1
+            )
+            is_member = len(participants) > 0
+            logger.info(f"User {user_id} channel membership: {is_member}")
+            return is_member
         except Exception as e:
-            logger.error(f"Channel lookup failed: {e}")
+            logger.error(f"Failed to check channel membership: {e}")
             return False
 
     except Exception as e:
-        logger.error(f"Critical error in channel membership check for user {user_id}: {e}")
+        logger.error(f"Channel check error: {e}")
         return False
 
 # Add error handler for the client
@@ -118,9 +123,14 @@ async def main():
         await init_user_db()  # This creates the users table
         await init_premium_db()
         
-        # Start bot
+        # Start bot and verify channel access
         await client.start()
-        logger.info("Main bot created")
+        
+        if not await verify_bot_channel_access():
+            logger.error("Bot cannot access the channel. Please check permissions.")
+            return
+
+        logger.info("Bot started successfully with channel access verified")
 
         # Add a test message to verify bot is working
         logger.info("Bot is now running and listening for messages...")
