@@ -65,35 +65,46 @@ def split_keywords(keyword):
 # Replace the existing is_user_in_channel function with this improved version
 async def is_user_in_channel(client, user_id):
     try:
-        # First try getting channel info
-        channel = await client.get_entity(REQUIRED_CHANNEL)
-        
-        # For admin users, always return True
+        # Skip check for admin users
         if user_id in AUTHORIZED_USER_IDS:
             logger.info(f"Admin user {user_id} detected, skipping channel check")
             return True
-            
+
+        # Get channel entity
         try:
-            # Try to get the user's membership status directly
-            participant = await client.get_participants(channel, filter=ChannelParticipantsSearch(str(user_id)))
-            is_member = len(participant) > 0
+            channel = await client.get_entity(REQUIRED_CHANNEL)
+        except Exception as e:
+            logger.error(f"Could not get channel entity: {e}")
+            return True  # Allow access if channel check fails
+
+        try:
+            # Try to get participant info directly
+            participant = await client.get_participant(channel, user_id)
+            is_member = participant is not None
             logger.info(f"User {user_id} channel membership status: {is_member}")
             return is_member
-        except Exception as e1:
-            logger.warning(f"First method failed, trying alternative check for {user_id}: {e1}")
+        except Exception as e:
+            logger.warning(f"Direct participant check failed for user {user_id}: {e}")
+            
             try:
-                # Alternative method: try to get user directly
-                participant = await client.get_entity(InputPeerChannel(channel.id, channel.access_hash))
-                return True
+                # Alternative check: try to get full channel member list
+                participants = await client.get_participants(
+                    channel,
+                    search=str(user_id),
+                    limit=1
+                )
+                is_member = len(participants) > 0
+                logger.info(f"Alternative check for user {user_id}: {is_member}")
+                return is_member
             except Exception as e2:
-                logger.warning(f"Alternative check failed for {user_id}: {e2}")
+                logger.error(f"All membership checks failed for user {user_id}: {e2}")
+                # If all checks fail, we'll assume they're not in the channel
                 return False
-                
+
     except Exception as e:
-        logger.error(f"Channel membership check error for user {user_id}: {e}")
-        # If we can't verify, we'll assume they're in the channel
-        # This prevents locking out users due to technical issues
-        return True
+        logger.error(f"Critical error in channel membership check for user {user_id}: {e}")
+        # In case of critical errors, default to requiring channel membership
+        return False
 
 # Add error handler for the client
 @client.on(events.NewMessage)
