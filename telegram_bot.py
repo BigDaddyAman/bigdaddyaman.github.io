@@ -826,51 +826,6 @@ async def main():
                 if conn:
                     await conn.close()
 
-        @client.on(events.NewMessage(pattern='/restore'))
-        async def restore_command(event):
-            if event.sender_id not in AUTHORIZED_USER_IDS:
-                await event.reply("You are not authorized to use this command.")
-                return
-                
-            try:
-                progress_msg = await event.reply("Looking for most recent backup...")
-                # Find most recent backup file
-                backup_files = [f for f in os.listdir('.') if f.startswith('files_backup_') and f.endswith('.json')]
-                if not backup_files:
-                    await progress_msg.edit("No backup files found!")
-                    return
-                    
-                latest_backup = max(backup_files)
-                await progress_msg.edit(f"Found backup: {latest_backup}\nRestoring filenames...")
-                
-                with open(latest_backup, 'r', encoding='utf-8') as f:
-                    backup_data = json.load(f)
-                    
-                conn = await AsyncPostgresConnection().__aenter__()
-                restored = 0
-                
-                for item in backup_data:
-                    try:
-                        await conn.execute(
-                            'UPDATE files SET file_name = $1 WHERE id = $2',
-                            item['file_name'], item['id']
-                        )
-                        restored += 1
-                        if restored % 50 == 0:
-                            await progress_msg.edit(f"Restored {restored}/{len(backup_data)} files...")
-                    except Exception as e:
-                        logger.error(f"Error restoring file {item['id']}: {e}")
-                        
-                await progress_msg.edit(f"✅ Restored {restored} filenames from backup!")
-                
-            except Exception as e:
-                error_msg = f"Restore error: {str(e)}"
-                logger.error(error_msg)
-                await event.respond(error_msg)
-            finally:
-                if conn:
-                    await conn.close()
-
         await client.run_until_disconnected()
     except Exception as e:
         logger.error(f"Critical error in main: {str(e)}", exc_info=True)
