@@ -61,6 +61,23 @@ AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and 
 REQUIRED_CHANNEL = -1001457047091  # Use channel ID instead of username
 CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"  # Add invite link
 
+# Add this function near the top with other utility functions
+def format_filename(filename: str) -> str:
+    """Format filename consistently when storing or displaying"""
+    if not filename:
+        return filename
+    # Remove special characters and brackets with their contents
+    formatted = re.sub(r'\([^)]*\)', '', filename)  # Remove (anything)
+    formatted = re.sub(r'\[[^]]*\]', '', formatted)  # Remove [anything]
+    formatted = re.sub(r'\{[^}]*\}', '', formatted)  # Remove {anything}
+    # Replace ALL non-alphanumeric characters (including spaces) with dots
+    formatted = re.sub(r'[^a-zA-Z0-9.]', '.', formatted)
+    # Convert multiple dots to single dot
+    formatted = re.sub(r'\.+', '.', formatted)
+    # Remove leading/trailing dots
+    formatted = formatted.strip('.')
+    return formatted
+
 def normalize_keyword(keyword):
     # Remove all special characters and replace with space
     keyword = re.sub(r'[^a-zA-Z0-9\s]', ' ', keyword).lower()
@@ -268,7 +285,7 @@ async def main():
                         file_name = None
                         for attr in event.message.document.attributes:
                             if isinstance(attr, DocumentAttributeFilename):
-                                file_name = attr.file_name
+                                file_name = format_filename(attr.file_name)  # Format filename when storing
                                 break
 
                         caption = event.message.message or ""
@@ -346,7 +363,11 @@ async def main():
                                 pagination_buttons.append(Button.inline("Next", f"page|{text}|{page + 1}"))
 
                             buttons.append(pagination_buttons)
-                            buttons.append([Button.inline("First Page", f"page|{text}|1"), Button.inline("Last Page", f"page|{total_pages}")])
+                            if total_pages > 1:
+                                buttons.append([
+                                    Button.inline("First Page", f"page|{text}|1"),
+                                    Button.inline("Last Page", f"page|{total_pages}")  # Added text parameter
+                                ])
 
                             await event.respond(header, buttons=buttons)
                         else:
@@ -417,7 +438,7 @@ async def main():
                         if total_pages > 1:
                             buttons.append([
                                 Button.inline("First Page", f"page|{keyword}|1"),
-                                Button.inline(f"Last Page", f"page|{total_pages}")
+                                Button.inline("Last Page", f"page|{keyword}|{total_pages}")  # Added keyword parameter
                             ])
                         
                         try:
@@ -715,6 +736,77 @@ async def main():
             except Exception as e:
                 logger.error(f"Error processing channel message: {e}")
 
+        # Add this function near other command handlers
+        @client.on(events.NewMessage(pattern='/migrate'))
+        async def migrate_command(event):
+            if event.sender_id not in AUTHORIZED_USER_IDS:
+                await event.reply("You are not authorized to use this command.")
+                return
+                
+            try:
+                progress_msg = await event.reply("Starting filename migration...")
+                conn = await AsyncPostgresConnection().__aenter__()
+                
+                # Get all files
+                rows = await conn.fetch('SELECT id, file_name FROM files')
+                total = len(rows)
+                updated = 0
+                last_update = 0
+                
+                for row in rows:
+                    try:
+                        old_name = row['file_name']
+                        if not old_name:
+                            continue
+                            
+                        new_name = format_filename(old_name)
+                        
+                        if old_name != new_name:
+                            await conn.execute(
+                                'UPDATE files SET file_name = $1 WHERE id = $2',
+                                new_name, row['id']
+                            )
+                            updated += 1
+                            
+                            # Show sample of changes every 50 files
+                            if updated % 50 == 0 and updated != last_update:
+                                try:
+                                    await progress_msg.edit(
+                                        f"Migration in progress...\n"
+                                        f"Updated: {updated}/{total} files\n"
+                                        f"Example: {old_name} → {new_name}\n"
+                                        f"Please wait..."
+                                    )
+                                    last_update = updated
+                                    await asyncio.sleep(2)
+                                except Exception as e:
+                                    logger.error(f"Error updating progress: {e}")
+                                    pass
+                    
+                    except Exception as e:
+                        logger.error(f"Error processing file {row['id']}: {e}")
+                        continue
+                
+                # Final update
+                try:
+                    final_message = (
+                        "✅ Filename migration completed!\n\n"
+                        f"📊 Total files processed: {total}\n"
+                        f"🔄 Files updated: {updated}\n\n"
+                        "All filenames now use dots instead of spaces"
+                    )
+                    await progress_msg.edit(final_message)
+                except:
+                    await event.respond(final_message)
+                    
+            except Exception as e:
+                error_msg = f"Migration error: {str(e)}"
+                logger.error(error_msg)
+                await event.respond(error_msg)
+            finally:
+                if conn:
+                    await conn.close()
+
         await client.run_until_disconnected()
     except Exception as e:
         logger.error(f"Critical error in main: {str(e)}", exc_info=True)
@@ -734,3 +826,4 @@ if __name__ == "__main__":
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}", exc_info=True)
+        raise
