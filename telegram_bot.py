@@ -58,20 +58,20 @@ VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wm
 AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and future moderator IDs
 
 # Add this constant near the top with other constants
-REQUIRED_CHANNEL = "kakifilem"  # Remove @ symbol
-CHANNEL_ID = -1002287369563  # Replace with your actual channel ID
+REQUIRED_CHANNEL = "-1001457047091"  # Use channel ID instead of username
+CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"  # Add invite link
 
 def normalize_keyword(keyword):
-    # Replace special characters with spaces, convert to lowercase, and trim whitespace
-    keyword = re.sub(r'[\.\_\@\(\)\-]', ' ', keyword).lower()
-    keyword = re.sub(r'\s+', ' ', keyword)  # Replace multiple spaces with a single space
+    # Remove all special characters and replace with space
+    keyword = re.sub(r'[^a-zA-Z0-9\s]', ' ', keyword).lower()
+    keyword = re.sub(r'\s+', ' ', keyword)  # Replace multiple spaces with single space
     return keyword.strip()
 
 def split_keywords(keyword):
     # Split the normalized keyword into individual words
     return keyword.split()
 
-# Replace the existing is_user_in_channel function with this improved version
+# Replace the existing is_user_in_channel function
 async def is_user_in_channel(client, user_id):
     try:
         # First check if user is admin
@@ -79,21 +79,20 @@ async def is_user_in_channel(client, user_id):
             logger.info(f"Admin user {user_id} detected, skipping channel check")
             return True
             
-        # Get channel entity once
-        if not hasattr(is_user_in_channel, 'channel'):
-            is_user_in_channel.channel = await client.get_entity(f"t.me/{REQUIRED_CHANNEL}")
-        
-        # Simple method: try to get member status
         try:
+            # Try to get channel using ID directly
+            channel = await client.get_entity(int(REQUIRED_CHANNEL))
             participant = await client(GetParticipantRequest(
-                channel=is_user_in_channel.channel,
+                channel=channel,
                 participant=user_id
             ))
             logger.info(f"User {user_id} found in channel")
             return True
         except Exception as e:
-            if "USER_NOT_PARTICIPANT" not in str(e):
-                logger.warning(f"Channel check error: {e}")
+            if "USER_NOT_PARTICIPANT" in str(e):
+                return False
+            logger.warning(f"Channel check error: {e}")
+            # If we can't verify, assume not in channel
             return False
             
     except Exception as e:
@@ -158,7 +157,7 @@ async def main():
             # Check channel membership first
             if not await is_user_in_channel(client, event.sender_id):
                 keyboard = [
-                    [Button.url("Join Channel", f"https://t.me/kakifilem")]
+                    [Button.url("Join Channel", CHANNEL_INVITE_LINK)]
                 ]
                 await event.reply(
                     "⚠️ Welcome! You must join our channel first to use this bot!\n\n"
@@ -241,7 +240,7 @@ async def main():
                 # Check channel membership first
                 if not await is_user_in_channel(client, event.sender_id):
                     keyboard = [
-                        [Button.url("Join Channel", f"https://t.me/kakifilem")]
+                        [Button.url("Join Channel", CHANNEL_INVITE_LINK)]
                     ]
                     await event.reply(
                         "⚠️ You must join our channel first to use this bot!\n\n"
