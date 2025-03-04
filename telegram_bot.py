@@ -61,21 +61,40 @@ AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and 
 REQUIRED_CHANNEL = -1001457047091  # Use channel ID instead of username
 CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"  # Add invite link
 
+# Add bot username constant near the top with other constants
+BOT_USERNAME = "@Kakifilemv1Bot"
+
 # Add this function near the top with other utility functions
 def format_filename(filename: str) -> str:
     """Format filename consistently when storing or displaying"""
     if not filename:
         return filename
-    # Remove special characters and brackets with their contents
-    formatted = re.sub(r'\([^)]*\)', '', filename)  # Remove (anything)
-    formatted = re.sub(r'\[[^]]*\]', '', formatted)  # Remove [anything]
-    formatted = re.sub(r'\{[^}]*\}', '', formatted)  # Remove {anything}
-    # Replace ALL non-alphanumeric characters (including spaces) with dots
+        
+    # First extract any years from the filename (whether in brackets or not)
+    years = re.findall(r'[\[\(\{]?(19|20)\d{2})[\]\}\)]?', filename)
+    
+    # Remove brackets and their contents EXCEPT when they contain a year
+    parts = re.split(r'[\[\(\{].*?[\]\}\)]', filename)
+    formatted = ''
+    last_end = 0
+    for match in re.finditer(r'[\[\(\{](.*?)[\]\}\)]', filename):
+        # Keep the content if it contains a year
+        if re.search(r'(19|20)\d{2}', match.group(1)):
+            formatted += filename[last_end:match.end()]
+        else:
+            formatted += filename[last_end:match.start()]
+        last_end = match.end()
+    formatted += filename[last_end:]
+    
+    # Replace special characters with dots
     formatted = re.sub(r'[^a-zA-Z0-9.]', '.', formatted)
-    # Convert multiple dots to single dot
+    
+    # Clean up multiple dots
     formatted = re.sub(r'\.+', '.', formatted)
+    
     # Remove leading/trailing dots
     formatted = formatted.strip('.')
+    
     return formatted
 
 def normalize_keyword(keyword):
@@ -236,7 +255,7 @@ async def main():
                                 await client.send_file(
                                     event.sender_id,
                                     file=document,
-                                    caption=formatted_caption
+                                    caption=f"{formatted_caption}\n\n{BOT_USERNAME}"
                                 )
                                 logger.info(f"File {file_name} sent successfully.")
                             except Exception as e:
@@ -483,7 +502,7 @@ async def main():
                             await client.send_file(
                                 event.sender_id,
                                 file=document,
-                                caption=file_info['file_name'].replace(" ", ".").replace("@", "")
+                                caption=f"{file_info['file_name'].replace(' ', '.').replace('@', '')}\n\n{BOT_USERNAME}"
                             )
                             await progress_msg.delete()
                         except Exception as e:
@@ -801,6 +820,51 @@ async def main():
                     
             except Exception as e:
                 error_msg = f"Migration error: {str(e)}"
+                logger.error(error_msg)
+                await event.respond(error_msg)
+            finally:
+                if conn:
+                    await conn.close()
+
+        @client.on(events.NewMessage(pattern='/restore'))
+        async def restore_command(event):
+            if event.sender_id not in AUTHORIZED_USER_IDS:
+                await event.reply("You are not authorized to use this command.")
+                return
+                
+            try:
+                progress_msg = await event.reply("Looking for most recent backup...")
+                # Find most recent backup file
+                backup_files = [f for f in os.listdir('.') if f.startswith('files_backup_') and f.endswith('.json')]
+                if not backup_files:
+                    await progress_msg.edit("No backup files found!")
+                    return
+                    
+                latest_backup = max(backup_files)
+                await progress_msg.edit(f"Found backup: {latest_backup}\nRestoring filenames...")
+                
+                with open(latest_backup, 'r', encoding='utf-8') as f:
+                    backup_data = json.load(f)
+                    
+                conn = await AsyncPostgresConnection().__aenter__()
+                restored = 0
+                
+                for item in backup_data:
+                    try:
+                        await conn.execute(
+                            'UPDATE files SET file_name = $1 WHERE id = $2',
+                            item['file_name'], item['id']
+                        )
+                        restored += 1
+                        if restored % 50 == 0:
+                            await progress_msg.edit(f"Restored {restored}/{len(backup_data)} files...")
+                    except Exception as e:
+                        logger.error(f"Error restoring file {item['id']}: {e}")
+                        
+                await progress_msg.edit(f"✅ Restored {restored} filenames from backup!")
+                
+            except Exception as e:
+                error_msg = f"Restore error: {str(e)}"
                 logger.error(error_msg)
                 await event.respond(error_msg)
             finally:
