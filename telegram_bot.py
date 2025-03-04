@@ -78,32 +78,41 @@ async def is_user_in_channel(client, user_id):
             return True  # Allow access if channel check fails
 
         try:
-            # Try to get participant info directly
-            participant = await client.get_participant(channel, user_id)
-            is_member = participant is not None
+            # Method 1: Try to get participant directly using get_participants
+            participants = await client.get_participants(
+                channel,
+                filter=ChannelParticipantsSearch(str(user_id))
+            )
+            is_member = any(p.id == user_id for p in participants)
             logger.info(f"User {user_id} channel membership status: {is_member}")
             return is_member
+            
         except Exception as e:
-            logger.warning(f"Direct participant check failed for user {user_id}: {e}")
+            logger.warning(f"Primary check failed for user {user_id}: {e}")
             
             try:
-                # Alternative check: try to get full channel member list
-                participants = await client.get_participants(
-                    channel,
-                    search=str(user_id),
-                    limit=1
-                )
-                is_member = len(participants) > 0
-                logger.info(f"Alternative check for user {user_id}: {is_member}")
-                return is_member
+                # Method 2: Alternative check using get_entity
+                user = await client.get_entity(user_id)
+                if not user:
+                    return False
+                    
+                # Try to get participants with username if available
+                if user.username:
+                    participants = await client.get_participants(
+                        channel,
+                        search=user.username
+                    )
+                    is_member = any(p.id == user_id for p in participants)
+                    logger.info(f"Alternative check for user {user_id}: {is_member}")
+                    return is_member
+                return False
+                
             except Exception as e2:
                 logger.error(f"All membership checks failed for user {user_id}: {e2}")
-                # If all checks fail, we'll assume they're not in the channel
                 return False
 
     except Exception as e:
         logger.error(f"Critical error in channel membership check for user {user_id}: {e}")
-        # In case of critical errors, default to requiring channel membership
         return False
 
 # Add error handler for the client
