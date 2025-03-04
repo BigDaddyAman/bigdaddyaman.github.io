@@ -102,6 +102,64 @@ def format_filename(filename: str) -> str:
     
     return clean
 
+# Add this new function near other utility functions
+def format_caption(caption: str) -> str:
+    """Format caption with dots instead of spaces and remove special characters"""
+    if not caption:
+        return caption
+        
+    # Remove "Credit" line if exists
+    caption = re.sub(r'\nCredit.*', '', caption)
+    
+    # First extract any years from the caption
+    years = re.findall(r'[\[\(\{]?((?:19|20)\d{2})[\]\}\)]?', caption)
+    
+    # Replace special characters with dots, but keep brackets/parentheses temporarily
+    clean = caption
+    clean = re.sub(r'[^a-zA-Z0-9\s\(\)\[\]\{\}]', '.', clean)
+    
+    # Remove brackets but keep their content
+    clean = re.sub(r'[\(\[\{]', '.', clean)
+    clean = re.sub(r'[\)\]\}]', '.', clean)
+    
+    # Replace spaces with dots
+    clean = re.sub(r'\s+', '.', clean)
+    
+    # Clean up multiple dots
+    clean = re.sub(r'\.+', '.', clean)
+    
+    # Remove leading/trailing dots
+    clean = clean.strip('.')
+    
+    return clean
+
+# Add this new function near other utility functions
+def format_button_text(text: str) -> str:
+    """Format button text to be concise with dots"""
+    if not text:
+        return "Unknown File"
+        
+    # First extract any years from the text
+    years = re.findall(r'[\[\(\{]?((?:19|20)\d{2})[\]\}\)]?', text)
+    
+    # Replace special characters with dots
+    clean = re.sub(r'[^a-zA-Z0-9\s\(\)\[\]\{\}]', '.', text)
+    
+    # Remove brackets but keep their content
+    clean = re.sub(r'[\(\[\{]', '.', clean)
+    clean = re.sub(r'[\)\]\}]', '.', clean)
+    
+    # Replace spaces with dots
+    clean = re.sub(r'\s+', '.', clean)
+    
+    # Clean up multiple dots
+    clean = re.sub(r'\.+', '.', clean)
+    
+    # Remove leading/trailing dots
+    clean = clean.strip('.')
+    
+    return clean
+
 def normalize_keyword(keyword):
     # Remove all special characters and replace with space
     keyword = re.sub(r'[^a-zA-Z0-9\s]', ' ', keyword).lower()
@@ -260,7 +318,7 @@ async def main():
                                 await client.send_file(
                                     event.sender_id,
                                     file=document,
-                                    caption=f"{formatted_caption}\n\n{BOT_USERNAME}"
+                                    caption=f"{format_caption(file_info['caption'])}\n\n{BOT_USERNAME}"  # Modified
                                 )
                                 logger.info(f"File {file_name} sent successfully.")
                             except Exception as e:
@@ -362,13 +420,14 @@ async def main():
                                 token = await store_token(str(id))
                                 if token:
                                     import urllib.parse
+                                    display_name = format_button_text(file_name or caption or "Unknown File")  # Modified
                                     safe_video_name = urllib.parse.quote(file_name, safe='')
                                     safe_token = urllib.parse.quote(token, safe='')
                                     if await is_premium(event.sender_id):
-                                        buttons.append([Button.inline(file_name or caption or "Unknown File", f"{id}|{page}")])
+                                        buttons.append([Button.inline(display_name, f"{id}|{page}")])
                                     else:
                                         website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                                        buttons.append([Button.url(file_name or caption or "Unknown File", website_link)])
+                                        buttons.append([Button.url(display_name, website_link)])
                             
                             # Pagination Buttons
                             pagination_buttons = []
@@ -431,13 +490,10 @@ async def main():
                             token = await store_token(str(id))
                             if token:
                                 import urllib.parse
-                                # Clean the filename for display (replace dots with spaces)
-                                display_name = file_name or caption or "Unknown File"
-                                display_name = display_name.replace("_", " ").replace(".", " ")
+                                display_name = format_button_text(file_name or caption or "Unknown File")  # Modified
                                 safe_video_name = urllib.parse.quote(file_name, safe='')
                                 safe_token = urllib.parse.quote(token, safe='')
                                 
-                                # Generate direct website link
                                 website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
                                 buttons.append([Button.url(display_name, website_link)])
                         
@@ -507,7 +563,7 @@ async def main():
                             await client.send_file(
                                 event.sender_id,
                                 file=document,
-                                caption=f"{file_info['file_name'].replace(' ', '.').replace('@', '')}\n\n{BOT_USERNAME}"
+                                caption=f"{format_caption(file_info['caption'])}\n\n{BOT_USERNAME}"  # Modified
                             )
                             await progress_msg.delete()
                         except Exception as e:
