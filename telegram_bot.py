@@ -70,32 +70,37 @@ def format_filename(filename: str) -> str:
     if not filename:
         return filename
         
-    # First extract any years from the filename (whether in brackets or not)
-    years = re.findall(r'[\[\(\{]?(19|20)\d{2})[\]\}\)]?', filename)
+    # First extract any years from the filename
+    years = re.findall(r'[\[\(\{]?((?:19|20)\d{2})[\]\}\)]?', filename)
     
-    # Remove brackets and their contents EXCEPT when they contain a year
-    parts = re.split(r'[\[\(\{].*?[\]\}\)]', filename)
-    formatted = ''
-    last_end = 0
-    for match in re.finditer(r'[\[\(\{](.*?)[\]\}\)]', filename):
-        # Keep the content if it contains a year
-        if re.search(r'(19|20)\d{2}', match.group(1)):
-            formatted += filename[last_end:match.end()]
+    # Create clean version without any brackets
+    clean = re.sub(r'[\[\(\{].*?[\]\}\)]', '.', filename)
+    clean = re.sub(r'[^a-zA-Z0-9.]', '.', clean)
+    
+    # Clean up dots
+    clean = re.sub(r'\.+', '.', clean)
+    clean = clean.strip('.')
+    
+    # If we found a year, make sure it's included in correct format
+    if years:
+        year = years[0]  # Take first year found
+        # Remove any existing year from clean name
+        clean = re.sub(r'\.?\d{4}\.?', '.', clean)
+        # Split into parts and insert year after title
+        parts = clean.split('.')
+        if len(parts) > 1:
+            # Insert year after first part (title)
+            parts.insert(1, year)
         else:
-            formatted += filename[last_end:match.start()]
-        last_end = match.end()
-    formatted += filename[last_end:]
+            # Just append year if single part
+            parts.append(year)
+        clean = '.'.join(parts)
     
-    # Replace special characters with dots
-    formatted = re.sub(r'[^a-zA-Z0-9.]', '.', formatted)
+    # Final cleanup of multiple dots
+    clean = re.sub(r'\.+', '.', clean)
+    clean = clean.strip('.')
     
-    # Clean up multiple dots
-    formatted = re.sub(r'\.+', '.', formatted)
-    
-    # Remove leading/trailing dots
-    formatted = formatted.strip('.')
-    
-    return formatted
+    return clean
 
 def normalize_keyword(keyword):
     # Remove all special characters and replace with space
@@ -457,7 +462,7 @@ async def main():
                         if total_pages > 1:
                             buttons.append([
                                 Button.inline("First Page", f"page|{keyword}|1"),
-                                Button.inline("Last Page", f"page|{keyword}|{total_pages}")  # Added keyword parameter
+                                Button.inline("Last Page", f"page|{total_pages}")  # Added keyword parameter
                             ])
                         
                         try:
