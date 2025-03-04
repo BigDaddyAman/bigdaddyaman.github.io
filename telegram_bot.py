@@ -26,6 +26,8 @@ from telethon.tl.types import (
     ChannelParticipantsSearch
 )
 
+from telethon.tl.functions.channels import GetParticipantRequest
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -42,15 +44,22 @@ api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
 
-client = TelegramClient(MemorySession(), api_id, api_hash).start(bot_token=bot_token)
+client = TelegramClient(
+    MemorySession(),  # Use StringSession() if you want to save the session
+    api_id,
+    api_hash,
+    connection_retries=None,
+    auto_reconnect=True
+).start(bot_token=bot_token)
 
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
 
 # List of authorized user IDs
 AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and future moderator IDs
 
-# Update the channel constant to use numeric ID
-REQUIRED_CHANNEL = -1001457047091  # Use the numeric channel ID
+# Add this constant near the top with other constants
+REQUIRED_CHANNEL = "kakifilem"  # Remove @ symbol
+CHANNEL_ID = -1001234567890  # Replace with your actual channel ID
 
 def normalize_keyword(keyword):
     # Replace special characters with spaces, convert to lowercase, and trim whitespace
@@ -62,47 +71,35 @@ def split_keywords(keyword):
     # Split the normalized keyword into individual words
     return keyword.split()
 
-# Add this function
-async def verify_bot_channel_access():
-    try:
-        channel = await client.get_entity(REQUIRED_CHANNEL)
-        logger.info(f"Successfully connected to channel: {channel.title}")
-        # Test bot's permissions
-        me = await client.get_me()
-        participants = await client.get_participants(channel, filter=ChannelParticipantsSearch(str(me.id)))
-        if not participants:
-            logger.error("Bot is not in the channel!")
-            return False
-        logger.info("Bot has required channel access")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to verify channel access: {e}")
-        return False
-
+# Replace the existing is_user_in_channel function with this improved version
 async def is_user_in_channel(client, user_id):
     try:
-        # Skip check for admin users
+        # First check if user is admin
         if user_id in AUTHORIZED_USER_IDS:
             logger.info(f"Admin user {user_id} detected, skipping channel check")
             return True
-
+            
+        # Get channel entity once
+        if not hasattr(is_user_in_channel, 'channel'):
+            is_user_in_channel.channel = await client.get_entity(f"t.me/{REQUIRED_CHANNEL}")
+        
+        # Simple method: try to get member status
         try:
-            # Direct check using channel ID
-            participants = await client.get_participants(
-                REQUIRED_CHANNEL,
-                search=str(user_id),
-                limit=1
-            )
-            is_member = len(participants) > 0
-            logger.info(f"User {user_id} channel membership: {is_member}")
-            return is_member
+            participant = await client(GetParticipantRequest(
+                channel=is_user_in_channel.channel,
+                participant=user_id
+            ))
+            logger.info(f"User {user_id} found in channel")
+            return True
         except Exception as e:
-            logger.error(f"Failed to check channel membership: {e}")
+            if "USER_NOT_PARTICIPANT" not in str(e):
+                logger.warning(f"Channel check error: {e}")
             return False
-
+            
     except Exception as e:
-        logger.error(f"Channel check error: {e}")
-        return False
+        logger.error(f"Channel membership check error: {e}")
+        # If we can't verify, let them through to avoid blocking legitimate users
+        return True
 
 # Add error handler for the client
 @client.on(events.NewMessage)
@@ -116,21 +113,41 @@ async def error_handler(event):
     except Exception as e:
         logger.error(f"Uncaught error: {str(e)}", exc_info=True)
 
+async def init_bot():
+    try:
+        # Get bot info
+        bot_info = await client.get_me()
+        logger.info(f"Bot initialized: @{bot_info.username}")
+        
+        # Get channel info and verify bot's admin status
+        channel = await client.get_entity(f"t.me/{REQUIRED_CHANNEL}")
+        participant = await client(GetParticipantRequest(
+            channel=channel,
+            participant=bot_info.id
+        ))
+        
+        if not participant.participant.admin_rights:
+            logger.warning("⚠️ Bot is not an admin in the channel!")
+        else:
+            logger.info("✅ Bot confirmed as channel admin")
+            
+    except Exception as e:
+        logger.error(f"Bot initialization error: {e}")
+        raise
+
 async def main():
     try:
-        # Initialize database
+        # Initialize bot first
+        await init_bot()
+        
+        # Then initialize databases
         await init_db()
-        await init_user_db()  # This creates the users table
+        await init_user_db()
         await init_premium_db()
         
-        # Start bot and verify channel access
+        # Start bot
         await client.start()
-        
-        if not await verify_bot_channel_access():
-            logger.error("Bot cannot access the channel. Please check permissions.")
-            return
-
-        logger.info("Bot started successfully with channel access verified")
+        logger.info("Main bot created")
 
         # Add a test message to verify bot is working
         logger.info("Bot is now running and listening for messages...")
