@@ -58,7 +58,7 @@ VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wm
 AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and future moderator IDs
 
 # Add this constant near the top with other constants
-REQUIRED_CHANNEL = "-1001457047091"  # Use channel ID instead of username
+REQUIRED_CHANNEL = -1001457047091  # Use channel ID instead of username
 CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"  # Add invite link
 
 def normalize_keyword(keyword):
@@ -80,8 +80,8 @@ async def is_user_in_channel(client, user_id):
             return True
             
         try:
-            # Try to get channel using ID directly
-            channel = await client.get_entity(int(REQUIRED_CHANNEL))
+            # Try to get channel entity directly using ID
+            channel = await client.get_entity(REQUIRED_CHANNEL)  # Use integer directly
             participant = await client(GetParticipantRequest(
                 channel=channel,
                 participant=user_id
@@ -92,13 +92,12 @@ async def is_user_in_channel(client, user_id):
             if "USER_NOT_PARTICIPANT" in str(e):
                 return False
             logger.warning(f"Channel check error: {e}")
-            # If we can't verify, assume not in channel
             return False
             
     except Exception as e:
         logger.error(f"Channel membership check error: {e}")
-        # If we can't verify, let them through to avoid blocking legitimate users
-        return True
+        # If we can't verify, assume not in channel for safety
+        return False
 
 # Add error handler for the client
 @client.on(events.NewMessage)
@@ -118,17 +117,22 @@ async def init_bot():
         bot_info = await client.get_me()
         logger.info(f"Bot initialized: @{bot_info.username}")
         
-        # Get channel info and verify bot's admin status
-        channel = await client.get_entity(f"t.me/{REQUIRED_CHANNEL}")
-        participant = await client(GetParticipantRequest(
-            channel=channel,
-            participant=bot_info.id
-        ))
-        
-        if not participant.participant.admin_rights:
-            logger.warning("⚠️ Bot is not an admin in the channel!")
-        else:
-            logger.info("✅ Bot confirmed as channel admin")
+        # Get channel info and verify bot's admin status - MODIFIED
+        try:
+            channel = await client.get_entity(REQUIRED_CHANNEL)  # Use integer directly
+            participant = await client(GetParticipantRequest(
+                channel=channel,
+                participant=bot_info.id
+            ))
+            
+            if not participant.participant.admin_rights:
+                logger.warning("⚠️ Bot is not an admin in the channel!")
+            else:
+                logger.info("✅ Bot confirmed as channel admin")
+                
+        except ValueError as e:
+            logger.error(f"Channel access error: {e}")
+            raise
             
     except Exception as e:
         logger.error(f"Bot initialization error: {e}")
