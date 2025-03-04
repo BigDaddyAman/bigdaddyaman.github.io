@@ -59,7 +59,7 @@ AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and 
 
 # Add this constant near the top with other constants
 REQUIRED_CHANNEL = "kakifilem"  # Remove @ symbol
-CHANNEL_ID = -1001234567890  # Replace with your actual channel ID
+CHANNEL_ID = -1002287369563  # Replace with your actual channel ID
 
 def normalize_keyword(keyword):
     # Replace special characters with spaces, convert to lowercase, and trim whitespace
@@ -315,18 +315,16 @@ async def main():
                             buttons = []
                             for result in video_results:
                                 id, caption, file_name, rank = result  # Unpack all 4 values
-                                # Clean up the display name by replacing underscores with spaces
-                                display_name = (file_name or caption or "Unknown File").replace("_", " ")
                                 token = await store_token(str(id))
                                 if token:
                                     import urllib.parse
                                     safe_video_name = urllib.parse.quote(file_name, safe='')
                                     safe_token = urllib.parse.quote(token, safe='')
                                     if await is_premium(event.sender_id):
-                                        buttons.append([Button.inline(display_name, f"{id}|{page}")])
+                                        buttons.append([Button.inline(file_name or caption or "Unknown File", f"{id}|{page}")])
                                     else:
                                         website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                                        buttons.append([Button.url(display_name, website_link)])
+                                        buttons.append([Button.url(file_name or caption or "Unknown File", website_link)])
                             
                             # Pagination Buttons
                             pagination_buttons = []
@@ -363,76 +361,82 @@ async def main():
                 if data.startswith("page|"):
                     parts = data.split("|")
                     if len(parts) < 3:
-                        await event.answer("Invalid page data")
-                        return
-
+                        return  # Silently ignore invalid page data
+                        
                     _, keyword, page = parts
                     page = int(page)
                     page_size = 10
                     offset = (page - 1) * page_size
-
+                    
                     keyword_list = split_keywords(keyword)
-
                     db_results = await search_files(keyword_list, page_size, offset)
                     total_results = await count_search_results(keyword_list)
                     total_pages = math.ceil(total_results / page_size)
-
+                    
                     video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-
+                    
                     if video_results:
                         header = f"{total_results} Results for '{keyword}'"
                         buttons = []
                         for result in video_results:
                             id, caption, file_name, rank = result
-                            display_name = (file_name or caption or "Unknown File").replace("_", " ")
                             token = await store_token(str(id))
                             if token:
                                 import urllib.parse
+                                # Clean the filename for display (replace dots with spaces)
+                                display_name = file_name or caption or "Unknown File"
+                                display_name = display_name.replace("_", " ").replace(".", " ")
                                 safe_video_name = urllib.parse.quote(file_name, safe='')
                                 safe_token = urllib.parse.quote(token, safe='')
-                                if await is_premium(event.sender_id):
-                                    buttons.append([Button.inline(display_name, f"{id}|{page}")])
-                                else:
-                                    website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                                    buttons.append([Button.url(display_name, website_link)])
-
+                                
+                                # Generate direct website link
+                                website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                                buttons.append([Button.url(display_name, website_link)])
+                        
                         # Pagination Buttons
                         pagination_buttons = []
                         start_page = max(1, page - 2)
                         end_page = min(total_pages, start_page + 4)
-
+                        
                         if page > 1:
-                            pagination_buttons.append(Button.inline("Prev", f"page|{keyword}|{page - 1}"))
+                            pagination_buttons.append(Button.inline("Prev", f"page|{keyword}|{page-1}"))
                         for p in range(start_page, end_page + 1):
                             if p == page:
                                 pagination_buttons.append(Button.inline(f"[{p}]", f"ignore|{keyword}|{p}"))
                             else:
                                 pagination_buttons.append(Button.inline(str(p), f"page|{keyword}|{p}"))
                         if page < total_pages:
-                            pagination_buttons.append(Button.inline("Next", f"page|{keyword}|{page + 1}"))
-
+                            pagination_buttons.append(Button.inline("Next", f"page|{keyword}|{page+1}"))
+                        
                         buttons.append(pagination_buttons)
-                        buttons.append([
-                            Button.inline("First Page", f"page|{keyword}|1"), 
-                            Button.inline("Last Page", f"page|{total_pages}")
-                        ])
 
+                        # Only add First/Last page buttons if there are more than one page
+                        if total_pages > 1:
+                            buttons.append([
+                                Button.inline("First Page", f"page|{keyword}|1"),
+                                Button.inline(f"Last Page", f"page|{total_pages}")
+                            ])
+                        
                         try:
                             await event.edit(header, buttons=buttons)
                         except errors.MessageNotModifiedError:
-                            # Silently ignore "message not modified" errors
-                            await event.answer()
+                            pass  # Silently ignore "message not modified" errors
                     else:
-                        await event.edit("No more results.")
+                        try:
+                            await event.edit("No more results.")
+                        except errors.MessageNotModifiedError:
+                            pass
+                            
                 elif data.startswith("ignore|"):
-                    # Just show a small popup notification
+                    # Do nothing for current page clicks
                     await event.answer("Current page")
                 else:
+                    # Handle direct file ID clicks for premium users
                     id, current_page = data.split("|")
                     file_info = await get_file_by_id(str(id))
                     
                     if not file_info:
-                        await event.answer("File not found")
+                        await event.respond("File not found.")
                         return
 
                     if await is_premium(user_id):
@@ -462,7 +466,7 @@ async def main():
                             logger.error(f"Error sending file to premium user: {e}")
                             await progress_msg.edit('⚠️ Failed to send file. Please try again or contact support.')
                     else:
-                        # Free users get direct website link without showing another button
+                        # Free users get website link - direct open without confirmation
                         token = await store_token(str(id))
                         if token:
                             video_name = file_info['file_name']
@@ -470,28 +474,16 @@ async def main():
                             safe_video_name = urllib.parse.quote(video_name, safe='')
                             safe_token = urllib.parse.quote(token, safe='')
                             website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                            
-                            # Just send the link directly
-                            await client.send_message(
-                                event.sender_id,
-                                website_link,
-                                link_preview=False
-                            )
-                            # Remove the old message
-                            try:
-                                await event.delete()
-                            except:
-                                pass
+                            # Use new message with URL button instead of answer
+                            buttons = [[Button.url("🎬 Download Movie", website_link)]]
+                            await event.edit("Choose download option:", buttons=buttons)
                         else:
-                            await event.answer("Failed to generate download link")
+                            await event.respond("Failed to generate download link.")
 
-            except errors.MessageNotModifiedError:
-                # Silently ignore "message not modified" errors
-                await event.answer()
             except Exception as e:
-                # Log the error but don't show it to the user
+                # Silently log errors without showing to user
                 logger.error(f"Error in callback query handler: {e}")
-                await event.answer("Please try again")
+                return
 
         @client.on(events.NewMessage(pattern='/listdb'))
         async def list_db(event):
