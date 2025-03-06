@@ -161,28 +161,14 @@ def format_button_text(text: str) -> str:
     return clean
 
 def normalize_keyword(keyword):
-    """Normalize keywords for better search matching"""
-    if not keyword:
-        return ""
-        
-    # Replace dots with spaces for searching
-    keyword = keyword.replace('.', ' ')
-    
-    # Remove special characters except spaces
-    keyword = re.sub(r'[^a-zA-Z0-9\s]', '', keyword)
-    
-    # Convert to lowercase and normalize spaces
-    keyword = keyword.lower().strip()
-    keyword = re.sub(r'\s+', ' ', keyword)
-    
-    return keyword
+    # Remove all special characters and replace with space
+    keyword = re.sub(r'[^a-zA-Z0-9\s]', ' ', keyword).lower()
+    keyword = re.sub(r'\s+', ' ', keyword)  # Replace multiple spaces with single space
+    return keyword.strip()
 
 def split_keywords(keyword):
-    """Split keywords into searchable terms"""
-    # Split by both spaces and dots
-    terms = re.split(r'[\s.]+', keyword)
-    # Remove empty terms and duplicates
-    return list(set(filter(None, terms)))
+    # Split the normalized keyword into individual words
+    return keyword.split()
 
 # Replace the existing is_user_in_channel function
 async def is_user_in_channel(client, user_id):
