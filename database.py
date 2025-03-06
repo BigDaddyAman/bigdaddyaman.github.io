@@ -79,9 +79,11 @@ async def store_file_metadata(id: str, access_hash: str, file_reference: bytes,
     if not conn:
         return None
     try:
-        # Convert id and access_hash to strings if they're integers
         id_str = str(id)
         access_hash_str = str(access_hash)
+        
+        # Normalize the filename before storing
+        normalized_filename = normalize_filename(file_name)
         
         await conn.execute('''
             INSERT INTO files 
@@ -94,7 +96,7 @@ async def store_file_metadata(id: str, access_hash: str, file_reference: bytes,
                 caption = EXCLUDED.caption,
                 keywords = EXCLUDED.keywords,
                 file_name = EXCLUDED.file_name
-        ''', id_str, access_hash_str, file_reference, mime_type, caption, keywords, file_name)
+        ''', id_str, access_hash_str, file_reference, mime_type, caption, keywords, normalized_filename)
     finally:
         await conn.close()
 
@@ -171,16 +173,10 @@ async def search_files(keyword_list: List[str], page_size: int, offset: int):
         return []
     try:
         # Create phrase from original keywords
-        original_phrase = ' '.join(keyword_list)
+        original_phrase = ' '.join(keyword_list).lower()
         
-        # Create different types of matches with weights
-        exact_phrase = f"'{original_phrase}'"  # Highest priority
-        adjacent_words = '<->' .join(f"'{kw}'" for kw in keyword_list)  # Second priority
-        and_words = ' & '.join(f"'{kw}'" for kw in keyword_list)  # Third priority
-        partial_words = ' | '.join(f"'{kw}':*" for kw in keyword_list)  # Lowest priority
-        
-        # Combine queries with weights using OR
-        tsquery = f"({exact_phrase}) | ({adjacent_words}) | ({and_words}) | ({partial_words})"
+        # Normalize the search phrase
+        search_pattern = f"%{original_phrase}%"
         
         query = '''
             WITH ranked_results AS (
@@ -189,39 +185,46 @@ async def search_files(keyword_list: List[str], page_size: int, offset: int):
                     caption, 
                     file_name,
                     CASE
-                        -- Exact phrase match in filename (highest priority)
-                        WHEN lower(file_name) LIKE $4 THEN 4.0
+                        -- Exact phrase match in filename
+                        WHEN lower(file_name) LIKE $4 THEN 10.0
                         -- Exact phrase match in caption
-                        WHEN lower(caption) LIKE $4 THEN 3.0
-                        -- All words present in correct order
-                        WHEN to_tsvector('english', keywords) @@ to_tsquery('english', $5) THEN 2.0
-                        -- All words present but in any order
-                        WHEN to_tsvector('english', keywords) @@ to_tsquery('english', $6) THEN 1.0
-                        -- Partial matches
-                        ELSE ts_rank_cd(to_tsvector('english', keywords), to_tsquery('english', $1))
+                        WHEN lower(caption) LIKE $4 THEN 8.0
+                        -- Partial match in filename
+                        WHEN lower(file_name) LIKE ANY($5::text[]) THEN 6.0
+                        -- Partial match in caption
+                        WHEN lower(caption) LIKE ANY($5::text[]) THEN 4.0
+                        -- Fallback to full-text search ranking
+                        ELSE ts_rank_cd(to_tsvector('simple', coalesce(file_name, '') || ' ' || coalesce(caption, '')), 
+                                      to_tsquery('simple', $1))
                     END as rank
                 FROM files 
                 WHERE 
-                    to_tsvector('english', keywords) @@ to_tsquery('english', $1)
+                    lower(file_name) LIKE $4 
+                    OR lower(caption) LIKE $4
+                    OR lower(file_name) LIKE ANY($5::text[])
+                    OR lower(caption) LIKE ANY($5::text[])
+                    OR to_tsvector('simple', coalesce(file_name, '') || ' ' || coalesce(caption, '')) @@ to_tsquery('simple', $1)
             )
             SELECT id, caption, file_name, rank
             FROM ranked_results
-            WHERE rank > 0.1  -- Filter out very low relevance results
+            WHERE rank > 0.1
             ORDER BY rank DESC, file_name ASC
             LIMIT $2 OFFSET $3
         '''
         
-        # Create LIKE patterns for exact matching
-        like_pattern = f"%{original_phrase.lower()}%"
+        # Create patterns for partial matches
+        partial_patterns = [f"%{kw.lower()}%" for kw in keyword_list]
+        
+        # Convert keyword list to tsquery format
+        tsquery = ' & '.join(keyword_list)
         
         return await conn.fetch(
             query, 
             tsquery,  # $1
             page_size,  # $2 
             offset,  # $3
-            like_pattern,  # $4
-            adjacent_words,  # $5
-            and_words  # $6
+            search_pattern,  # $4
+            partial_patterns,  # $5
         )
     except asyncpg.PostgresError as e:
         logger.error(f"Database error in search: {e}")
@@ -235,25 +238,40 @@ async def count_search_results(keyword_list: List[str]) -> int:
     if not conn:
         return 0
     try:
-        # Create phrase from original keywords
-        original_phrase = ' '.join(keyword_list)
-        
-        # Create different types of matches
-        exact_phrase = f"'{original_phrase}'"
-        adjacent_words = '<->' .join(f"'{kw}'" for kw in keyword_list)
-        and_words = ' & '.join(f"'{kw}'" for kw in keyword_list)
-        
-        # Combine queries (excluding very low relevance partial matches)
-        tsquery = f"({exact_phrase}) | ({adjacent_words}) | ({and_words})"
+        original_phrase = ' '.join(keyword_list).lower()
+        search_pattern = f"%{original_phrase}%"
+        partial_patterns = [f"%{kw.lower()}%" for kw in keyword_list]
         
         query = '''
             SELECT COUNT(*) 
             FROM files 
-            WHERE to_tsvector('english', keywords) @@ to_tsquery('english', $1)
+            WHERE 
+                lower(file_name) LIKE $1 
+                OR lower(caption) LIKE $1
+                OR lower(file_name) LIKE ANY($2::text[])
+                OR lower(caption) LIKE ANY($2::text[])
         '''
-        return await conn.fetchval(query, tsquery)
+        return await conn.fetchval(query, search_pattern, partial_patterns)
     except asyncpg.PostgresError as e:
         logger.error(f"Database error in count: {e}")
         return 0
     finally:
         await conn.close()
+
+# Add a new function to handle filename storage formatting
+def normalize_filename(filename: str) -> str:
+    """Normalize filename for consistent storage and searching"""
+    if not filename:
+        return filename
+        
+    # Remove common video suffixes
+    clean = re.sub(r'\.(?:mp4|mkv|avi|mov|wmv|flv|webm)$', '', filename, flags=re.IGNORECASE)
+    
+    # Remove timestamp patterns
+    clean = re.sub(r'video_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d+', '', clean)
+    
+    # Clean up spaces and special characters
+    clean = re.sub(r'[\s_]+', ' ', clean)
+    clean = clean.strip()
+    
+    return clean
