@@ -94,7 +94,7 @@ def format_filename(filename: str) -> str:
         else:
             # Just append year if single part
             parts.append(year)
-        clean = '.'.join(parts)
+        clean = '.join(parts)
     
     # Final cleanup of multiple dots
     clean = re.sub(r'\.+', '.', clean)
@@ -886,6 +886,90 @@ async def main():
             finally:
                 if conn:
                     await conn.close()
+
+        @client.on(events.NewMessage(pattern='/scan_channel'))
+        async def scan_channel(event):
+            if event.sender_id not in AUTHORIZED_USER_IDS:
+                await event.reply("You are not authorized to use this command.")
+                return
+
+            try:
+                progress_msg = await event.reply("🔍 Starting channel scan...")
+                total_processed = 0
+                total_fixed = 0
+                total_removed = 0
+                batch_size = 100  # Process in batches to avoid memory issues
+                
+                channel = await client.get_entity(REQUIRED_CHANNEL)
+                
+                async def process_message(message):
+                    nonlocal total_fixed, total_removed
+                    if message.document:
+                        try:
+                            document = message.document
+                            file_name = None
+                            for attr in message.document.attributes:
+                                if isinstance(attr, DocumentAttributeFilename):
+                                    file_name = attr.file_name
+                                    break
+
+                            if not file_name:
+                                return
+
+                            caption = message.message or ""
+                            keywords = normalize_keyword(caption) + " " + normalize_keyword(file_name)
+                            
+                            # Store or update file metadata
+                            await store_file_metadata(
+                                id=str(document.id),
+                                access_hash=str(document.access_hash),
+                                file_reference=document.file_reference or b'',  # Handle None case
+                                mime_type=document.mime_type or '',
+                                caption=caption,
+                                keywords=keywords,
+                                file_name=file_name
+                            )
+                            total_fixed += 1
+                        except Exception as e:
+                            logger.error(f"Error processing message {message.id}: {e}")
+                            total_removed += 1
+
+                # Get messages in batches
+                messages = []
+                async for message in client.iter_messages(channel, limit=None):
+                    messages.append(message)
+                    total_processed += 1
+                    
+                    if len(messages) >= batch_size:
+                        # Process batch
+                        await asyncio.gather(*[process_message(msg) for msg in messages])
+                        messages = []  # Clear batch
+                        
+                        # Update progress
+                        await progress_msg.edit(
+                            f"🔄 Scanning channel...\n"
+                            f"✓ Processed: {total_processed}\n"
+                            f"✅ Fixed: {total_fixed}\n"
+                            f"❌ Removed: {total_removed}\n"
+                            f"Please wait..."
+                        )
+
+                # Process remaining messages
+                if messages:
+                    await asyncio.gather(*[process_message(msg) for msg in messages])
+
+                # Update final progress
+                await progress_msg.edit(
+                    f"✅ Channel scan completed!\n\n"
+                    f"📊 Statistics:\n"
+                    f"• Total processed: {total_processed}\n"
+                    f"• Fixed entries: {total_fixed}\n"
+                    f"• Removed entries: {total_removed}"
+                )
+
+            except Exception as e:
+                logger.error(f"Channel scan error: {e}")
+                await event.reply(f"❌ Error scanning channel: {str(e)}")
 
         await client.run_until_disconnected()
     except Exception as e:
