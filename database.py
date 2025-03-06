@@ -170,19 +170,43 @@ async def search_files(keyword_list: List[str], page_size: int, offset: int):
     if not conn:
         return []
     try:
-        # Join keywords with AND for exact matches, then OR for partial matches
-        exact_match = ' & '.join(f"'{kw}'" for kw in keyword_list)
-        partial_match = ' | '.join(f"'{kw}':*" for kw in keyword_list)
-        tsquery = f"({exact_match}) | {partial_match}"
+        # Clean and prepare search terms
+        cleaned_keywords = []
+        for kw in keyword_list:
+            # Split terms by dots and spaces
+            terms = kw.replace('.', ' ').split()
+            cleaned_keywords.extend(terms)
+        
+        # Remove duplicates and empty terms
+        cleaned_keywords = list(set(filter(None, cleaned_keywords)))
+        
+        if not cleaned_keywords:
+            return []
+
+        # Create the search query
+        tsquery_parts = []
+        for kw in cleaned_keywords:
+            # Add both exact and prefix matching
+            tsquery_parts.append(f"'{kw}'")
+            tsquery_parts.append(f"'{kw}':*")
+        
+        tsquery = ' | '.join(tsquery_parts)
         
         query = '''
             SELECT id, caption, file_name,
                    ts_rank_cd(to_tsvector('english', keywords), to_tsquery('english', $1)) as rank
             FROM files 
             WHERE to_tsvector('english', keywords) @@ to_tsquery('english', $1)
-            ORDER BY rank DESC, id DESC
+            ORDER BY 
+                ts_rank_cd(to_tsvector('english', keywords), to_tsquery('english', $1)) DESC,
+                similarity(lower(file_name), lower($2)) DESC,
+                id DESC
             LIMIT $2 OFFSET $3
         '''
+        
+        # Join original search terms for similarity matching
+        original_search = ' '.join(keyword_list)
+        
         return await conn.fetch(query, tsquery, page_size, offset)
     except asyncpg.PostgresError as e:
         logger.error(f"Database error in search: {e}")
