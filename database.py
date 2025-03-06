@@ -170,20 +170,59 @@ async def search_files(keyword_list: List[str], page_size: int, offset: int):
     if not conn:
         return []
     try:
-        # Join keywords with AND for exact matches, then OR for partial matches
-        exact_match = ' & '.join(f"'{kw}'" for kw in keyword_list)
-        partial_match = ' | '.join(f"'{kw}':*" for kw in keyword_list)
-        tsquery = f"({exact_match}) | {partial_match}"
+        # Create phrase from original keywords
+        original_phrase = ' '.join(keyword_list)
+        
+        # Create different types of matches with weights
+        exact_phrase = f"'{original_phrase}'"  # Highest priority
+        adjacent_words = '<->' .join(f"'{kw}'" for kw in keyword_list)  # Second priority
+        and_words = ' & '.join(f"'{kw}'" for kw in keyword_list)  # Third priority
+        partial_words = ' | '.join(f"'{kw}':*" for kw in keyword_list)  # Lowest priority
+        
+        # Combine queries with weights using OR
+        tsquery = f"({exact_phrase}) | ({adjacent_words}) | ({and_words}) | ({partial_words})"
         
         query = '''
-            SELECT id, caption, file_name,
-                   ts_rank_cd(to_tsvector('english', keywords), to_tsquery('english', $1)) as rank
-            FROM files 
-            WHERE to_tsvector('english', keywords) @@ to_tsquery('english', $1)
-            ORDER BY rank DESC, id DESC
+            WITH ranked_results AS (
+                SELECT 
+                    id, 
+                    caption, 
+                    file_name,
+                    CASE
+                        -- Exact phrase match in filename (highest priority)
+                        WHEN lower(file_name) LIKE $4 THEN 4.0
+                        -- Exact phrase match in caption
+                        WHEN lower(caption) LIKE $4 THEN 3.0
+                        -- All words present in correct order
+                        WHEN to_tsvector('english', keywords) @@ to_tsquery('english', $5) THEN 2.0
+                        -- All words present but in any order
+                        WHEN to_tsvector('english', keywords) @@ to_tsquery('english', $6) THEN 1.0
+                        -- Partial matches
+                        ELSE ts_rank_cd(to_tsvector('english', keywords), to_tsquery('english', $1))
+                    END as rank
+                FROM files 
+                WHERE 
+                    to_tsvector('english', keywords) @@ to_tsquery('english', $1)
+            )
+            SELECT id, caption, file_name, rank
+            FROM ranked_results
+            WHERE rank > 0.1  -- Filter out very low relevance results
+            ORDER BY rank DESC, file_name ASC
             LIMIT $2 OFFSET $3
         '''
-        return await conn.fetch(query, tsquery, page_size, offset)
+        
+        # Create LIKE patterns for exact matching
+        like_pattern = f"%{original_phrase.lower()}%"
+        
+        return await conn.fetch(
+            query, 
+            tsquery,  # $1
+            page_size,  # $2 
+            offset,  # $3
+            like_pattern,  # $4
+            adjacent_words,  # $5
+            and_words  # $6
+        )
     except asyncpg.PostgresError as e:
         logger.error(f"Database error in search: {e}")
         return []
@@ -196,7 +235,17 @@ async def count_search_results(keyword_list: List[str]) -> int:
     if not conn:
         return 0
     try:
-        tsquery = ' | '.join(f"'{kw}':*" for kw in keyword_list)
+        # Create phrase from original keywords
+        original_phrase = ' '.join(keyword_list)
+        
+        # Create different types of matches
+        exact_phrase = f"'{original_phrase}'"
+        adjacent_words = '<->' .join(f"'{kw}'" for kw in keyword_list)
+        and_words = ' & '.join(f"'{kw}'" for kw in keyword_list)
+        
+        # Combine queries (excluding very low relevance partial matches)
+        tsquery = f"({exact_phrase}) | ({adjacent_words}) | ({and_words})"
+        
         query = '''
             SELECT COUNT(*) 
             FROM files 
@@ -205,9 +254,6 @@ async def count_search_results(keyword_list: List[str]) -> int:
         return await conn.fetchval(query, tsquery)
     except asyncpg.PostgresError as e:
         logger.error(f"Database error in count: {e}")
-        return 0
-    except Exception as e:
-        logger.error(f"Unexpected error in count: {e}")
         return 0
     finally:
         await conn.close()
