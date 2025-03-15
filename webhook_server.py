@@ -8,6 +8,7 @@ import asyncio
 from database import init_db
 from userdb import init_user_db
 from premium import init_premium_db
+from telegram_bot import setup_handlers, setup_bot
 
 # Load environment variables
 load_dotenv()
@@ -25,83 +26,95 @@ api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
 
 # Webhook settings
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL', '').rstrip('/')
 WEBHOOK_PATH = f"/webhook/{bot_token}"
 PORT = int(os.getenv('PORT', 8000))
 
-# Initialize bot
-bot = TelegramClient('bot', api_id, api_hash).start(bot_token=bot_token)
+# Initialize bot globally but don't connect yet
+bot = None
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize everything on startup"""
+    global bot
     try:
-        # Initialize databases
+        # Initialize databases first
         await init_db()
         await init_user_db()
         await init_premium_db()
         
-        # Set webhook
-        await bot.connect()
-        if not await bot.is_user_authorized():
-            logger.error("Bot not authorized!")
-            raise HTTPException(status_code=500, detail="Bot not authorized")
+        # Initialize bot
+        bot = await setup_bot()
+        setup_handlers(bot)
+        
+        if not bot.is_connected():
+            await bot.connect()
             
         # Set webhook
-        webhook_info = await bot.get_webhook_info()
-        if webhook_info.url != WEBHOOK_URL:
-            success = await bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+        webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
+        try:
+            await bot.delete_webhook()  # Clear any existing webhook
+            success = await bot.set_webhook(url=webhook_url)
             if success:
-                logger.info(f"Webhook set to {WEBHOOK_URL}{WEBHOOK_PATH}")
+                logger.info(f"Webhook set to {webhook_url}")
             else:
-                logger.error("Failed to set webhook")
-                raise HTTPException(status_code=500, detail="Failed to set webhook")
-                
+                raise Exception("Failed to set webhook")
+        except Exception as e:
+            logger.error(f"Webhook setup error: {e}")
+            raise
+            
         logger.info("Bot initialized successfully")
+        
     except Exception as e:
         logger.error(f"Startup error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
+    global bot
     try:
-        await bot.disconnect()
-        logger.info("Bot disconnected")
+        if bot and bot.is_connected():
+            await bot.disconnect()
+            logger.info("Bot disconnected")
     except Exception as e:
         logger.error(f"Shutdown error: {e}")
 
 @app.get("/")
 async def health_check():
     """Health check endpoint"""
+    global bot
     try:
-        if not bot.is_connected():
-            await bot.connect()
+        if not bot or not bot.is_connected():
+            raise HTTPException(status_code=503, detail="Bot not connected")
         return {"status": "healthy", "bot_connected": True}
     except Exception as e:
         logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=503, detail="Bot not connected")
+        raise HTTPException(status_code=503, detail=str(e))
 
 @app.post(WEBHOOK_PATH)
 async def handle_webhook(request: Request):
     """Handle incoming webhook updates"""
+    global bot
     try:
+        if not bot:
+            raise HTTPException(status_code=503, detail="Bot not initialized")
+            
         data = await request.json()
-        update = types.Update.from_dict(data)
-        
-        # Process update
-        await bot.process_update(update)
+        await bot.process_update(types.Update.from_dict(data))
         return Response(status_code=200)
     except Exception as e:
         logger.error(f"Error handling webhook: {e}")
         return Response(status_code=500)
 
 if __name__ == "__main__":
-    uvicorn.run(
+    config = uvicorn.Config(
         "webhook_server:app",
         host="0.0.0.0",
         port=PORT,
-        workers=1,  # Single worker for Telethon
-        loop="uvloop",
+        workers=1,
+        loop="auto",
         reload=False
     )
+    server = uvicorn.Server(config)
+    asyncio.run(server.serve())
