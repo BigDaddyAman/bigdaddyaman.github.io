@@ -44,14 +44,6 @@ api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
 
-client = TelegramClient(
-    MemorySession(),  # Use StringSession() if you want to save the session
-    api_id,
-    api_hash,
-    connection_retries=None,
-    auto_reconnect=True
-).start(bot_token=bot_token)
-
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
 
 # List of authorized user IDs

@@ -1,0 +1,12 @@
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r requirements.txt"
+
+[deploy]
+startCommand = "python webhook_server.py"
+healthcheckPath = "/"
+restartPolicyType = "on_failure"
+healthcheckTimeout = 300
+
+[service]
+port = 8000
