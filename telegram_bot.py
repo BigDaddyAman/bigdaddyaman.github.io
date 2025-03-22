@@ -779,7 +779,7 @@ async def main():
                 logger.error(f"Error in renew_premium: {e}")
                 await event.reply("An error occurred while processing the request.")
 
-        @client.on(events.NewMessage(chats=-1002505050345))  # Your backup channel ID
+        @client.on(events.NewMessage(chats=-1002647276011))  # Your backup channel ID
         async def handle_channel_messages(event):
             try:
                 if event.message.document:
