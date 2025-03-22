@@ -170,52 +170,20 @@ async def search_files(keyword_list: List[str], page_size: int, offset: int):
     if not conn:
         return []
     try:
-        # Join original search phrase
-        original_phrase = ' '.join(keyword_list).lower()
+        # Join keywords with AND for exact matches, then OR for partial matches
+        exact_match = ' & '.join(f"'{kw}'" for kw in keyword_list)
+        partial_match = ' | '.join(f"'{kw}':*" for kw in keyword_list)
+        tsquery = f"({exact_match}) | {partial_match}"
         
-        # Create exact phrase search
-        exact_phrase_query = f"'{original_phrase}'"
-        
-        # Create individual word search with stemming
-        word_query = ' & '.join(f"'{kw}':*" for kw in keyword_list)
-        
-        # Combine queries with priority for exact matches
-        combined_query = f"""
-            SELECT 
-                id, 
-                caption, 
-                file_name,
-                CASE 
-                    WHEN lower(keywords) LIKE $4 THEN 3  -- Exact match
-                    WHEN lower(keywords) ~* $5 THEN 2    -- Phrase match anywhere
-                    ELSE 1                               -- Partial match
-                END as match_type,
-                ts_rank_cd(to_tsvector('english', keywords), to_tsquery('english', $1)) as rank
+        query = '''
+            SELECT id, caption, file_name,
+                   ts_rank_cd(to_tsvector('english', keywords), to_tsquery('english', $1)) as rank
             FROM files 
-            WHERE 
-                to_tsvector('english', keywords) @@ to_tsquery('english', $2)
-                OR to_tsvector('english', keywords) @@ to_tsquery('english', $3)
-            ORDER BY 
-                match_type DESC,
-                rank DESC,
-                id DESC
-            LIMIT $6 OFFSET $7
-        """
-        
-        # Parameters for exact and partial matches
-        exact_pattern = f"%{original_phrase}%"
-        phrase_pattern = f"\\m{original_phrase}\\M"
-        
-        return await conn.fetch(
-            combined_query, 
-            exact_phrase_query,    # $1: exact phrase tsquery
-            word_query,            # $2: word-based tsquery
-            exact_phrase_query,    # $3: backup exact phrase
-            exact_pattern,         # $4: LIKE pattern
-            phrase_pattern,        # $5: regex pattern
-            page_size,            # $6: limit
-            offset                 # $7: offset
-        )
+            WHERE to_tsvector('english', keywords) @@ to_tsquery('english', $1)
+            ORDER BY rank DESC, id DESC
+            LIMIT $2 OFFSET $3
+        '''
+        return await conn.fetch(query, tsquery, page_size, offset)
     except asyncpg.PostgresError as e:
         logger.error(f"Database error in search: {e}")
         return []
@@ -228,26 +196,18 @@ async def count_search_results(keyword_list: List[str]) -> int:
     if not conn:
         return 0
     try:
-        # Join original search phrase
-        original_phrase = ' '.join(keyword_list).lower()
-        
-        # Create exact phrase search
-        exact_phrase_query = f"'{original_phrase}'"
-        
-        # Create individual word search with stemming
-        word_query = ' & '.join(f"'{kw}':*" for kw in keyword_list)
-        
+        tsquery = ' | '.join(f"'{kw}':*" for kw in keyword_list)
         query = '''
             SELECT COUNT(*) 
             FROM files 
-            WHERE 
-                to_tsvector('english', keywords) @@ to_tsquery('english', $1)
-                OR to_tsvector('english', keywords) @@ to_tsquery('english', $2)
+            WHERE to_tsvector('english', keywords) @@ to_tsquery('english', $1)
         '''
-        
-        return await conn.fetchval(query, exact_phrase_query, word_query)
+        return await conn.fetchval(query, tsquery)
     except asyncpg.PostgresError as e:
         logger.error(f"Database error in count: {e}")
+        return 0
+    except Exception as e:
+        logger.error(f"Unexpected error in count: {e}")
         return 0
     finally:
         await conn.close()
