@@ -83,6 +83,18 @@ async def store_file_metadata(id: str, access_hash: str, file_reference: bytes,
         id_str = str(id)
         access_hash_str = str(access_hash)
         
+        # Ensure caption and keywords are strings, not None
+        safe_caption = str(caption) if caption is not None else ""
+        safe_keywords = str(keywords) if keywords is not None else ""
+        safe_file_name = str(file_name) if file_name is not None else ""
+        
+        # Clean the caption to remove unwanted patterns
+        cleaned_caption = re.sub(r'\((.*?GB)\)', '', safe_caption).strip()  # Remove size in parentheses
+        cleaned_caption = re.sub(r'IMDB\.Rating\.[0-9.]+', '', cleaned_caption)  # Remove IMDB rating
+        cleaned_caption = re.sub(r'Genre\.[a-zA-Z.]+', '', cleaned_caption)  # Remove Genre
+        cleaned_caption = re.sub(r'\.+', '.', cleaned_caption)  # Replace multiple dots with single dot
+        cleaned_caption = cleaned_caption.strip('.')  # Remove leading/trailing dots
+        
         await conn.execute('''
             INSERT INTO files 
             (id, access_hash, file_reference, mime_type, caption, keywords, file_name)
@@ -94,7 +106,11 @@ async def store_file_metadata(id: str, access_hash: str, file_reference: bytes,
                 caption = EXCLUDED.caption,
                 keywords = EXCLUDED.keywords,
                 file_name = EXCLUDED.file_name
-        ''', id_str, access_hash_str, file_reference, mime_type, caption, keywords, file_name)
+        ''', id_str, access_hash_str, file_reference, mime_type, cleaned_caption, safe_keywords, safe_file_name)
+        
+    except Exception as e:
+        logger.error(f"Error storing file metadata: {e}")
+        return None
     finally:
         await conn.close()
 
@@ -170,22 +186,63 @@ async def search_files(keyword_list: List[str], page_size: int, offset: int):
     if not conn:
         return []
     try:
-        # Join keywords with AND for exact matches, then OR for partial matches
-        exact_match = ' & '.join(f"'{kw}'" for kw in keyword_list)
-        partial_match = ' | '.join(f"'{kw}':*" for kw in keyword_list)
-        tsquery = f"({exact_match}) | {partial_match}"
+        # Join original search phrase
+        original_phrase = ' '.join(keyword_list).lower()
         
-        query = '''
-            SELECT id, caption, file_name,
-                   ts_rank_cd(to_tsvector('english', keywords), to_tsquery('english', $1)) as rank
-            FROM files 
-            WHERE to_tsvector('english', keywords) @@ to_tsquery('english', $1)
-            ORDER BY rank DESC, id DESC
-            LIMIT $2 OFFSET $3
-        '''
-        return await conn.fetch(query, tsquery, page_size, offset)
-    except asyncpg.PostgresError as e:
-        logger.error(f"Database error in search: {e}")
+        # Create normalized search patterns
+        exact_pattern = f"%{original_phrase}%"
+        words_pattern = ''.join(f"(?=.*{word})" for word in keyword_list)
+        
+        query = """
+            WITH RankedResults AS (
+                SELECT 
+                    id, 
+                    caption, 
+                    file_name,
+                    CASE 
+                        WHEN LOWER(file_name) = LOWER($1) THEN 100  -- Exact full match
+                        WHEN LOWER(file_name) LIKE LOWER($2) THEN 90  -- Contains exact phrase
+                        WHEN LOWER(file_name) ~ ALL($3::text[]) THEN 80  -- Contains all words in any order
+                        WHEN LOWER(caption) = LOWER($1) THEN 70  -- Exact caption match
+                        WHEN LOWER(caption) LIKE LOWER($2) THEN 60  -- Caption contains phrase
+                        WHEN LOWER(caption) ~ ALL($3::text[]) THEN 50  -- Caption contains all words
+                        ELSE 0
+                    END as relevance_score
+                FROM files 
+                WHERE 
+                    LOWER(file_name) ~ $4
+                    OR LOWER(caption) ~ $4
+            )
+            SELECT 
+                id, 
+                caption, 
+                file_name,
+                relevance_score
+            FROM RankedResults 
+            WHERE relevance_score > 0
+            ORDER BY 
+                relevance_score DESC,
+                file_name ASC
+            LIMIT $5 OFFSET $6
+        """
+        
+        # Create word patterns
+        word_patterns = [f"(?i){word}" for word in keyword_list]
+        combined_pattern = f".*{original_phrase}.*"
+        
+        results = await conn.fetch(
+            query,
+            original_phrase,                    # $1: exact phrase
+            exact_pattern,                      # $2: LIKE pattern
+            word_patterns,                      # $3: array of word patterns
+            combined_pattern,                   # $4: regex pattern
+            page_size,                         # $5: limit
+            offset                             # $6: offset
+        )
+        
+        return results
+    except Exception as e:
+        logger.error(f"Search error: {e}")
         return []
     finally:
         await conn.close()
@@ -196,18 +253,22 @@ async def count_search_results(keyword_list: List[str]) -> int:
     if not conn:
         return 0
     try:
-        tsquery = ' | '.join(f"'{kw}':*" for kw in keyword_list)
-        query = '''
+        # Join original search phrase
+        original_phrase = ' '.join(keyword_list).lower()
+        combined_pattern = f".*{original_phrase}.*"
+        
+        query = """
             SELECT COUNT(*) 
             FROM files 
-            WHERE to_tsvector('english', keywords) @@ to_tsquery('english', $1)
-        '''
-        return await conn.fetchval(query, tsquery)
-    except asyncpg.PostgresError as e:
-        logger.error(f"Database error in count: {e}")
-        return 0
+            WHERE 
+                LOWER(file_name) ~ $1
+                OR LOWER(caption) ~ $1
+        """
+        
+        count = await conn.fetchval(query, combined_pattern)
+        return count
     except Exception as e:
-        logger.error(f"Unexpected error in count: {e}")
+        logger.error(f"Count error: {e}")
         return 0
     finally:
         await conn.close()

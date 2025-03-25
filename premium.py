@@ -61,6 +61,12 @@ async def is_premium(user_id: int) -> bool:
 async def add_or_renew_premium(user_id: int, days: int) -> bool:
     conn = None
     try:
+        # Validate days input
+        days = int(days)
+        if days <= 0 or days > 365:  # Limit to 1 year max
+            logger.error(f"Invalid days value: {days}")
+            return False
+            
         conn = await asyncpg.connect(
             database=os.getenv('PGDATABASE'),
             user=os.getenv('PGUSER'),
@@ -69,17 +75,35 @@ async def add_or_renew_premium(user_id: int, days: int) -> bool:
             port=os.getenv('PGPORT')
         )
         
-        # Calculate new expiry date
-        expiry_date = datetime.now() + timedelta(days=days)
+        # Get current expiry if exists
+        current = await conn.fetchrow('''
+            SELECT expiry_date 
+            FROM premium_users 
+            WHERE user_id = $1
+        ''', user_id)
         
+        # Calculate new expiry date
+        now = datetime.now()
+        if current and current['expiry_date'] > now:
+            # Add days to existing expiry
+            expiry_date = current['expiry_date'] + timedelta(days=days)
+        else:
+            # Start fresh from now
+            expiry_date = now + timedelta(days=days)
+        
+        # Use simple update/insert without complex CASE
         await conn.execute('''
             INSERT INTO premium_users (user_id, expiry_date)
             VALUES ($1, $2)
-            ON CONFLICT (user_id) DO UPDATE
-            SET expiry_date = $2
+            ON CONFLICT (user_id) 
+            DO UPDATE SET expiry_date = $2
         ''', user_id, expiry_date)
         
         return True
+        
+    except ValueError as e:
+        logger.error(f"Value error in premium renewal: {e}")
+        return False
     except Exception as e:
         logger.error(f"Error adding/renewing premium: {e}")
         return False

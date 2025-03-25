@@ -44,14 +44,6 @@ api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
 
-client = TelegramClient(
-    MemorySession(),  # Use StringSession() if you want to save the session
-    api_id,
-    api_hash,
-    connection_retries=None,
-    auto_reconnect=True
-).start(bot_token=bot_token)
-
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
 
 # List of authorized user IDs
@@ -762,24 +754,40 @@ async def main():
                 user_id = int(args[1])
                 days = int(args[2])
 
-                if await add_or_renew_premium(user_id, days):
-                    expiry_date = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
-                    success_message = (
-                        "✅ Premium access granted!\n\n"
-                        f"👤 User ID: {user_id}\n"
-                        f"⏳ Duration: {days} days\n"
-                        f"📅 Expires: {expiry_date}"
-                    )
-                    await event.reply(success_message)
+                # First check if user exists
+                user = None
+                try:
+                    user = await client.get_entity(user_id)
+                except Exception as e:
+                    await event.reply(f"❌ Could not find user with ID {user_id}")
+                    return
+
+                # Try to renew premium
+                success = await add_or_renew_premium(user_id, days)
+                if success:
+                    status = await get_premium_status(user_id)
+                    if status:
+                        success_message = (
+                            "✅ Premium access granted!\n\n"
+                            f"👤 User ID: {user_id}\n"
+                            f"👨 Username: {user.username if user.username else 'N/A'}\n"
+                            f"⏳ Duration: {days} days\n"
+                            f"📅 Expires: {status['expiry_date'].strftime('%Y-%m-%d %H:%M:%S')}\n"
+                            f"✨ Days remaining: {status['days_left']}"
+                        )
+                        await event.reply(success_message)
+                    else:
+                        await event.reply("✅ Premium renewed but couldn't fetch updated status.")
                 else:
-                    await event.reply("Failed to renew premium subscription.")
-            except ValueError:
-                await event.reply("Invalid user ID or number of days.")
+                    await event.reply("❌ Failed to renew premium subscription. Please check the days value (1-365).")
+                    
+            except ValueError as e:
+                await event.reply("❌ Invalid user ID or number of days. Both must be numbers.")
             except Exception as e:
                 logger.error(f"Error in renew_premium: {e}")
-                await event.reply("An error occurred while processing the request.")
+                await event.reply("❌ An error occurred while processing the request.")
 
-        @client.on(events.NewMessage(chats=-1002647276011))  # Your backup channel ID
+        @client.on(events.NewMessage(chats=-1002459978004))  # Your backup channel ID
         async def handle_channel_messages(event):
             try:
                 if event.message.document:
@@ -790,10 +798,19 @@ async def main():
                             file_name = attr.file_name
                             break
 
-                    caption = event.message.message or ""
-                    keywords = normalize_keyword(caption) + " " + normalize_keyword(file_name)
-                    keyword_list = split_keywords(keywords)
-
+                    # Ensure caption is a string, not None
+                    caption = event.message.message if event.message.message else ""
+                    
+                    # Clean the caption
+                    caption = re.sub(r'\((.*?GB)\)', '', caption).strip()  # Remove size in parentheses
+                    caption = re.sub(r'IMDB\.Rating\.[0-9.]+', '', caption)  # Remove IMDB rating
+                    caption = re.sub(r'Genre\.[a-zA-Z.]+', '', caption)  # Remove Genre
+                    caption = re.sub(r'\.+', '.', caption)  # Replace multiple dots with single dot
+                    caption = caption.strip('.')  # Remove leading/trailing dots
+                    
+                    # Create keywords from cleaned caption and filename
+                    keywords = f"{caption} {file_name}".strip()
+                    
                     logger.info(f"Auto-storing file from channel: {file_name}")
                     
                     # Convert id and access_hash to strings before storing
@@ -814,7 +831,7 @@ async def main():
                     logger.info(f"Successfully stored metadata for {file_name}")
 
             except Exception as e:
-                logger.error(f"Error processing channel message: {e}")
+                logger.error(f"Error processing channel message: {e}", exc_info=True)  # Added exc_info for better debugging
 
         # Add this function near other command handlers
         @client.on(events.NewMessage(pattern='/migrate'))
