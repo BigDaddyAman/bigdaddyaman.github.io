@@ -7,6 +7,7 @@ import uuid
 import base64
 from typing import List, Tuple, Optional
 from functools import lru_cache
+from redis_cache import redis_cache
 
 # Load environment variables from .env file
 load_dotenv()
@@ -206,41 +207,37 @@ def cache_key(keyword_list_str: str, page_size: int, offset: int) -> str:
 
 # Update search function to be more efficient
 async def search_files(keyword_list: List[str], page_size: int, offset: int):
-    """Search files with improved performance"""
-    cache_str = cache_key(','.join(sorted(keyword_list)), page_size, offset)
+    """Search files with improved performance and Redis caching"""
+    # Create cache key
+    cache_key = f"search:{','.join(sorted(keyword_list))}:{page_size}:{offset}"
+    
+    # Try to get from cache first
+    cached_results = await redis_cache.get(cache_key)
+    if cached_results:
+        return cached_results
     
     conn = await connect_to_db()
     if not conn:
         return []
+        
     try:
-        # Improved search query with better ranking
+        # Simplified and fixed search query
         query = """
-            WITH MATERIALIZED search_terms AS (
-                SELECT plainto_tsquery('english', $1) as query
-            ),
-            ranked_results AS (
-                SELECT 
-                    id, 
-                    caption, 
-                    file_name,
-                    ts_rank_cd(
-                        setweight(to_tsvector('english', coalesce(file_name, '')), 'A') ||
-                        setweight(to_tsvector('english', coalesce(caption, '')), 'B'),
-                        (SELECT query FROM search_terms)
-                    ) as rank
-                FROM files 
-                WHERE 
-                    to_tsvector('english', coalesce(file_name, '') || ' ' || coalesce(caption, '')) @@ 
-                    (SELECT query FROM search_terms)
-                    OR LOWER(file_name) LIKE LOWER($2)
-                    OR LOWER(caption) LIKE LOWER($2)
-            )
-            SELECT DISTINCT 
+            SELECT 
                 id, 
                 caption, 
                 file_name,
-                rank
-            FROM ranked_results
+                ts_rank_cd(
+                    setweight(to_tsvector('english', coalesce(file_name, '')), 'A') ||
+                    setweight(to_tsvector('english', coalesce(caption, '')), 'B'),
+                    plainto_tsquery('english', $1)
+                ) as rank
+            FROM files 
+            WHERE 
+                to_tsvector('english', coalesce(file_name, '') || ' ' || coalesce(caption, '')) @@ 
+                plainto_tsquery('english', $1)
+                OR LOWER(file_name) LIKE LOWER($2)
+                OR LOWER(caption) LIKE LOWER($2)
             ORDER BY rank DESC, file_name ASC
             LIMIT $3 OFFSET $4
         """
@@ -254,7 +251,14 @@ async def search_files(keyword_list: List[str], page_size: int, offset: int):
             offset
         )
         
-        return results
+        # Convert results to list of tuples for JSON serialization
+        results_list = [(r['id'], r['caption'], r['file_name'], float(r['rank'])) for r in results]
+        
+        # Cache the results
+        await redis_cache.set(cache_key, results_list, 3600)  # Cache for 1 hour
+        
+        return results_list
+        
     except Exception as e:
         logger.error(f"Search error: {e}")
         return []
@@ -263,23 +267,35 @@ async def search_files(keyword_list: List[str], page_size: int, offset: int):
 
 # Modify count_search_results to use the GIN index
 async def count_search_results(keyword_list: List[str]) -> int:
+    """Count search results with Redis caching"""
+    cache_key = f"count:{','.join(sorted(keyword_list))}"
+    
+    # Try to get from cache first
+    cached_count = await redis_cache.get(cache_key)
+    if cached_count is not None:
+        return cached_count
+        
     conn = await connect_to_db()
     if not conn:
         return 0
-    try:
-        # Join original search phrase
-        original_phrase = ' '.join(keyword_list).lower()
-        combined_pattern = f".*{original_phrase}.*"
         
+    try:
         query = """
             SELECT COUNT(*) 
             FROM files 
             WHERE 
-                LOWER(file_name) ~ $1
-                OR LOWER(caption) ~ $1
+                to_tsvector('english', coalesce(file_name, '') || ' ' || coalesce(caption, '')) @@ 
+                plainto_tsquery('english', $1)
+                OR LOWER(file_name) LIKE LOWER($2)
+                OR LOWER(caption) LIKE LOWER($2)
         """
         
-        count = await conn.fetchval(query, combined_pattern)
+        search_pattern = f"%{' '.join(keyword_list)}%"
+        count = await conn.fetchval(query, ' '.join(keyword_list), search_pattern)
+        
+        # Cache the count
+        await redis_cache.set(cache_key, count, 3600)  # Cache for 1 hour
+        
         return count
     except Exception as e:
         logger.error(f"Count error: {e}")
