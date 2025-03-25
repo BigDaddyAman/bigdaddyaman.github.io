@@ -632,7 +632,99 @@ async def setup_bot_handlers(client):
         events.CallbackQuery
     )
     
+    # Add broadcast command handler
+    client.add_event_handler(
+        lambda e: broadcast_command(e, client),
+        events.NewMessage(pattern='/broadcast')
+    )
+    
+    # Add renew command handler
+    client.add_event_handler(
+        lambda e: renew_command(e, client),
+        events.NewMessage(pattern='/renew')
+    )
+    
     logger.info("Bot handlers set up successfully")
+
+# Update the broadcast command
+async def broadcast_command(event, client):
+    """Handle broadcast command"""
+    if event.sender_id not in AUTHORIZED_USER_IDS:
+        await event.reply("You are not authorized to use this command.")
+        return
+        
+    # Get the message to broadcast
+    reply = await event.get_reply_message()
+    if not reply and not event.message.text.replace('/broadcast', '').strip():
+        usage = (
+            "Usage:\n"
+            "1. Text broadcast: /broadcast your message\n"
+            "2. Media broadcast: Reply to a photo/video with /broadcast [caption]\n"
+            "3. Media without caption: Reply with '/broadcast none'\n"
+            "\nNote: Broadcast will not be sent to admin users."
+        )
+        await event.reply(usage)
+        return
+
+    users = await get_all_users()
+    sent = 0
+    failed = 0
+    skipped = 0
+    blocked = 0
+    invalid = 0
+    
+    # Show progress message
+    progress = await event.reply("🚀 Broadcasting message...")
+    
+    try:
+        # ... rest of your existing broadcast code ...
+        pass
+    finally:
+        report = (
+            "📬 Broadcast Completed\n\n"
+            f"✅ Successfully sent: {sent}\n"
+            f"❌ Failed: {failed}\n"
+            f"🚫 Blocked: {blocked}\n"
+            f"⚠️ Invalid users: {invalid}\n"
+            f"⏩ Skipped (admins): {skipped}\n"
+            f"👥 Total reach: {sent + failed + blocked + invalid}\n"
+            f"📊 Success rate: {(sent/(sent+failed+blocked+invalid)*100 if sent+failed+blocked+invalid>0 else 0):.1f}%\n\n"
+            f"Total users in database: {len(users)}"
+        )
+        await progress.edit(report)
+
+# Update the renew command
+async def renew_command(event, client):
+    """Handle renew command"""
+    if event.sender_id not in AUTHORIZED_USER_IDS:
+        await event.reply("You are not authorized to use this command.")
+        return
+    
+    try:
+        args = event.message.text.split()
+        if len(args) != 3:
+            await event.reply("Usage: /renew <user_id> <days>")
+            return
+
+        user_id = int(args[1])
+        days = int(args[2])
+
+        if await add_or_renew_premium(user_id, days):
+            expiry_date = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+            success_message = (
+                "✅ Premium access granted!\n\n"
+                f"👤 User ID: {user_id}\n"
+                f"⏳ Duration: {days} days\n"
+                f"📅 Expires: {expiry_date}"
+            )
+            await event.reply(success_message)
+        else:
+            await event.reply("Failed to renew premium subscription.")
+    except ValueError:
+        await event.reply("Invalid user ID or number of days.")
+    except Exception as e:
+        logger.error(f"Error in renew_premium: {e}")
+        await event.reply("An error occurred while processing the request.")
 
 async def setup_backup_channel(client):
     """Set up backup channel monitoring"""
@@ -685,26 +777,6 @@ __all__ = [
     'handle_callback_query',
     'PORT'
 ]
-
-# Add back the broadcast command
-@client.on(events.NewMessage(pattern='/broadcast'))
-async def broadcast_command(event):
-    """Handle broadcast command"""
-    if event.sender_id not in AUTHORIZED_USER_IDS:
-        await event.reply("You are not authorized to use this command.")
-        return
-        
-    # ... rest of your existing broadcast command code ...
-
-# Add back the renew command
-@client.on(events.NewMessage(pattern='/renew'))
-async def renew_command(event):
-    """Handle renew command"""
-    if event.sender_id not in AUTHORIZED_USER_IDS:
-        await event.reply("You are not authorized to use this command.")
-        return
-        
-    # ... rest of your existing renew command code ...
 
 # Update message cache cleanup
 def cleanup_message_cache():
