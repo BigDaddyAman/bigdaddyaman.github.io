@@ -181,7 +181,7 @@ async def lifespan(app: FastAPI):
             logger.info(f"Initializing bot (attempt {retry_count + 1}/{max_retries})...")
             try:
                 client = await initialize_client()
-                if client.is_connected():
+                if client and client.is_connected():
                     await setup_bot_handlers()
                     logger.info("Bot handlers initialized")
                     break
@@ -226,8 +226,8 @@ async def lifespan(app: FastAPI):
         logger.error(f"Startup error: {str(e)}")
         raise
     finally:
-        if bot and bot.is_connected():
-            await bot.disconnect()
+        if 'client' in globals() and client and client.is_connected():
+            await client.disconnect()
             logger.info("Bot disconnected")
 
 # Update FastAPI initialization to use lifespan
