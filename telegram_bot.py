@@ -617,3 +617,65 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}", exc_info=True)
         raise
+
+# Move client declaration to top
+from telethon import TelegramClient, events
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Bot settings
+api_id = int(os.getenv('API_ID'))
+api_hash = os.getenv('API_HASH')
+bot_token = os.getenv('BOT_TOKEN')
+WEBHOOK_PATH = f"/webhook/{bot_token}"
+
+# Initialize client as None at module level
+_client = None
+
+async def get_client():
+    """Get the current client instance"""
+    global _client
+    if not _client:
+        _client = await initialize_client()
+    return _client
+
+async def initialize_client():
+    """Initialize and return the Telegram client"""
+    global _client
+    if not _client:
+        _client = TelegramClient(
+            MemorySession(),
+            api_id,
+            api_hash,
+            system_version="4.16.30-vxCUSTOM",
+            device_model="Railway Server"
+        )
+        await _client.connect()
+        await _client.start(bot_token=bot_token)
+    return _client
+
+# Move all your existing handler functions here, but remove @client decorators
+# Instead, we'll register them in setup_bot_handlers
+
+async def setup_bot_handlers(client):
+    """Set up all bot event handlers"""
+    # Register message handlers
+    client.add_event_handler(
+        start_handler,
+        events.NewMessage(pattern='/start')
+    )
+    
+    client.add_event_handler(
+        handle_messages,
+        events.NewMessage
+    )
+    
+    client.add_event_handler(
+        callback_handler,
+        events.CallbackQuery
+    )
+    
+    # ... rest of your existing telegram_bot.py code ...
