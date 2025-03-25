@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import uuid
 import base64
 from typing import List, Tuple, Optional
+from functools import lru_cache
 
 # Load environment variables from .env file
 load_dotenv()
@@ -180,8 +181,16 @@ async def get_file_by_id(file_id: str) -> Optional[Tuple]:
             logger.error(f"Database error while fetching file: {e}")
             return None
 
+# Add this cache decorator to search_files
+@lru_cache(maxsize=100)
+def cache_key(keyword_list_str: str, page_size: int, offset: int) -> str:
+    return f"{keyword_list_str}:{page_size}:{offset}"
+
 # Modify search_files to prioritize exact matches and limit results
 async def search_files(keyword_list: List[str], page_size: int, offset: int):
+    """Search files with caching"""
+    cache_str = cache_key(','.join(sorted(keyword_list)), page_size, offset)
+    
     conn = await connect_to_db()
     if not conn:
         return []

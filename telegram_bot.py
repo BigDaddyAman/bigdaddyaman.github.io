@@ -27,6 +27,9 @@ from userdb import (
     get_user_count, update_user_activity, get_active_users_count
 )
 from premium import init_premium_db, is_premium, add_or_renew_premium, get_premium_status
+from functools import lru_cache
+from typing import Dict, Set
+import time
 
 # Load environment variables and configure logging
 load_dotenv()
@@ -54,6 +57,31 @@ CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"
 BOT_USERNAME = "@Kakifilemv1Bot"
 BACKUP_CHANNEL_ID = -1002647276011  # Your backup channel ID
 RESULTS_PER_PAGE = 10
+
+# Cache for preventing duplicate messages
+_message_cache: Dict[int, Set[str]] = {}
+_cache_cleanup_time = 0
+
+def is_duplicate_message(chat_id: int, text: str) -> bool:
+    """Check if a message is a duplicate within 5 seconds"""
+    global _message_cache, _cache_cleanup_time
+    current_time = time.time()
+    
+    # Cleanup old cache entries every 30 seconds
+    if current_time - _cache_cleanup_time > 30:
+        _message_cache.clear()
+        _cache_cleanup_time = current_time
+    
+    cache_key = f"{chat_id}:{text}"
+    if chat_id not in _message_cache:
+        _message_cache[chat_id] = {cache_key}
+        return False
+        
+    if cache_key in _message_cache[chat_id]:
+        return True
+        
+    _message_cache[chat_id].add(cache_key)
+    return False
 
 # Client management functions
 async def get_client():
@@ -291,76 +319,81 @@ async def handle_callback_query(event, client):
         await event.answer("Error processing request", alert=True)
 
 async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
-    """Helper function to send or edit search results with improved pagination"""
-    header = f"🎬 {total_results} Results for '{text}'"
-    buttons = []
-
-    # Create result buttons
-    for result in video_results:
-        id, caption, file_name, rank = result
-        display_name = format_button_text(file_name or caption or "Unknown File")
-        token = await store_token(str(id))
-        if token:
-            safe_video_name = urllib.parse.quote(file_name, safe='')
-            safe_token = urllib.parse.quote(token, safe='')
-            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-            buttons.append([Button.url(display_name, website_link)])
-    
-    # Add improved pagination
-    if total_pages > 1:
-        pagination = []
-        
-        # First page
-        if page > 1:
-            pagination.append(Button.inline("⏮️", f"page|{text}|1"))
-        
-        # Previous page
-        if page > 1:
-            pagination.append(Button.inline("◀️", f"page|{text}|{page-1}"))
-        
-        # Current page indicator
-        pagination.append(Button.inline(f"📖 {page}/{total_pages}", f"current|{page}"))
-        
-        # Next page
-        if page < total_pages:
-            pagination.append(Button.inline("▶️", f"page|{text}|{page+1}"))
-        
-        # Last page
-        if page < total_pages:
-            pagination.append(Button.inline("⏭️", f"page|{text}|{total_pages}"))
-        
-        buttons.append(pagination)
-    
-    # Send or edit message
+    """Helper function to send or edit search results"""
     try:
+        # Check for duplicate message if not editing
+        if not is_edit:
+            chat_id = event.chat_id if hasattr(event, 'chat_id') else event.chat.id
+            if is_duplicate_message(chat_id, f"{text}:{page}"):
+                logger.info(f"Skipping duplicate message for {text} page {page}")
+                return
+
+        header = f"🎬 {total_results} Results for '{text}'"
+        buttons = []
+
+        # Create result buttons
+        for result in video_results:
+            id, caption, file_name, rank = result
+            display_name = format_button_text(file_name or caption or "Unknown File")
+            token = await store_token(str(id))
+            if token:
+                safe_video_name = urllib.parse.quote(file_name, safe='')
+                safe_token = urllib.parse.quote(token, safe='')
+                website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                buttons.append([Button.url(display_name, website_link)])
+
+        # Add pagination
+        if total_pages > 1:
+            nav = []
+            # First and Previous
+            if page > 1:
+                nav.extend([
+                    Button.inline("⏮️", f"page|{text}|1"),
+                    Button.inline("◀️", f"page|{text}|{page-1}")
+                ])
+            
+            # Current page
+            nav.append(Button.inline(f"[{page}/{total_pages}]", f"current|{page}"))
+            
+            # Next and Last
+            if page < total_pages:
+                nav.extend([
+                    Button.inline("▶️", f"page|{text}|{page+1}"),
+                    Button.inline("⏭️", f"page|{text}|{total_pages}")
+                ])
+            
+            buttons.append(nav)
+
+        # Send or edit message
         if is_edit:
             await event.edit(header, buttons=buttons)
         else:
             await event.respond(header, buttons=buttons)
+
     except Exception as e:
-        logger.error(f"Error sending search results: {e}")
+        logger.error(f"Error in send_search_results: {e}")
 
 async def handle_webhook_message(data: dict, client):
     """Handle webhook message updates"""
     try:
-        # Extract chat info from the message data
         chat = data.get('chat', {})
         chat_id = chat.get('id')
         chat_type = chat.get('type')
         
         if not chat_id or chat_type != 'private':
-            logger.info(f"Skipping non-private chat: {chat_type}")
             return
             
-        # Extract user info
-        from_user = data.get('from', {})
-        user_id = from_user.get('id')
-        if not user_id:
-            logger.warning("No user ID found in message")
+        text = data.get('text', '')
+        if not text or text.startswith('/'):
             return
 
-        # Check channel membership
-        if not await is_user_in_channel(client, user_id):
+        # Check for duplicate message
+        if is_duplicate_message(chat_id, text):
+            logger.info(f"Skipping duplicate webhook message: {text}")
+            return
+
+        # Process message normally
+        if not await is_user_in_channel(client, chat_id):
             keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
             await client.send_message(
                 chat_id,
@@ -371,10 +404,9 @@ async def handle_webhook_message(data: dict, client):
             )
             return
 
-        await update_user_activity(user_id)
+        await update_user_activity(chat_id)
         
         # Handle text messages
-        text = data.get('text', '')
         if text and not text.startswith('/'):
             try:
                 normalized_text = normalize_keyword(text.lower().strip())
