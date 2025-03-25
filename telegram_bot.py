@@ -88,7 +88,7 @@ def is_duplicate_message(chat_id: int, text: str) -> bool:
 async def get_client():
     """Get the current client instance"""
     global _client
-    if not _client:
+    if not __client:
         _client = await initialize_client()
     return _client
 
@@ -272,6 +272,12 @@ async def handle_messages(event, client):
 
         if event.message.text and not event.message.text.startswith('/'):
             try:
+                # Create message lock key
+                message_key = f"{event.chat_id}:{event.message.text.lower().strip()}"
+                if message_key in _message_cache:
+                    return
+                _message_cache[message_key] = time.time()
+
                 text = normalize_keyword(event.message.text.lower().strip())
                 keyword_list = split_keywords(text)
                 page = 1
@@ -287,7 +293,11 @@ async def handle_messages(event, client):
                 if video_results:
                     await send_search_results(event, text, video_results, page, total_pages, total_results)
                 else:
-                    await event.reply('Movies yang anda cari belum ada boleh request di @Request67_bot.')
+                    # Only send no results message if not in cache
+                    no_results_key = f"no_results:{event.chat_id}:{text}"
+                    if no_results_key not in _message_cache:
+                        _message_cache[no_results_key] = time.time()
+                        await event.reply('Movies yang anda cari belum ada boleh request di @Request67_bot.')
             except Exception as e:
                 logger.error(f"Error handling text message: {e}")
                 await event.reply('Failed to process your request.')
@@ -305,26 +315,18 @@ async def handle_callback_query(event, client):
             # Process page change
             await process_page_change(event, text, page)
             
-            # Answer callback query using Telethon's method
+            # Answer callback query silently without causing errors
             try:
-                await event(SetBotCallbackAnswerRequest(
-                    query_id=int(event.query.id),
-                    message="",
-                    alert=False
-                ))
+                await event.answer()
             except Exception as e:
-                logger.error(f"Error answering callback: {e}")
+                logger.debug(f"Non-critical callback answer error: {e}")
                 
         elif data.startswith("current|"):
-            # Answer current page callback
+            # Answer current page callback silently
             try:
-                await event(SetBotCallbackAnswerRequest(
-                    query_id=int(event.query.id),
-                    message=f"Current page {data.split('|')[1]}",
-                    alert=True
-                ))
+                await event.answer(f"Current page {data.split('|')[1]}", alert=True)
             except Exception as e:
-                logger.error(f"Error answering current page callback: {e}")
+                logger.debug(f"Non-critical callback answer error: {e}")
                 
     except Exception as e:
         logger.error(f"Error in callback handler: {e}")
@@ -332,25 +334,41 @@ async def handle_callback_query(event, client):
 async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
     """Helper function to send or edit search results with improved pagination"""
     try:
-        # Prevent duplicate messages with more robust cache key
-        cache_key = f"{event.chat_id}:{text}:{page}:{total_results}"
+        # Enhanced duplicate prevention
+        cache_key = f"results:{event.chat_id}:{text}:{page}"
+        current_time = time.time()
+        
+        # Check if message was sent in last 5 seconds
         if not is_edit and cache_key in _message_cache:
-            return
-        _message_cache[cache_key] = time.time()
+            last_time = _message_cache[cache_key]
+            if current_time - last_time < 5:
+                return
+                
+        _message_cache[cache_key] = current_time
 
+        # Prepare buttons in batches for better performance
         header = f"🎬 {total_results} Results for '{text}'"
         buttons = []
-
-        # Create result buttons
-        for result in video_results:
-            id, caption, file_name, rank = result
-            display_name = format_button_text(file_name or caption or "Unknown File")
-            token = await store_token(str(id))
-            if token:
-                safe_video_name = urllib.parse.quote(file_name, safe='')
-                safe_token = urllib.parse.quote(token, safe='')
-                website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                buttons.append([Button.url(display_name, website_link)])
+        
+        # Create result buttons in chunks
+        chunk_size = 5
+        for i in range(0, len(video_results), chunk_size):
+            chunk = video_results[i:i + chunk_size]
+            chunk_buttons = []
+            
+            for result in chunk:
+                id, caption, file_name, rank = result
+                display_name = format_button_text(file_name or caption or "Unknown File")
+                token = await store_token(str(id))
+                if token:
+                    safe_video_name = urllib.parse.quote(file_name, safe='')
+                    safe_token = urllib.parse.quote(token, safe='')
+                    website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                    chunk_buttons.append([Button.url(display_name, website_link)])
+            
+            buttons.extend(chunk_buttons)
+            if i + chunk_size < len(video_results):
+                await asyncio.sleep(0.1)  # Small delay between chunks
 
         # Add improved pagination with numbers and First/Last buttons
         if total_pages > 1:
@@ -795,4 +813,5 @@ def cleanup_message_cache():
     expired_keys = [k for k, v in _message_cache.items() if current_time - v > 30]
     for k in expired_keys:
         _message_cache.pop(k, None)
+
 
