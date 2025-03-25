@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Response, HTTPException
 from telethon import TelegramClient, events, types
+from telethon.errors import FloodWaitError, AuthKeyError
 from telethon.sessions import MemorySession  # Add this import
 import uvicorn
 import logging
@@ -44,16 +45,40 @@ bot = TelegramClient(
 
 # Create initialization function
 async def initialize_bot():
-    """Initialize and start the bot"""
-    try:
-        if not bot.is_connected():
-            await bot.connect()
-        await bot.start(bot_token=bot_token)
-        logger.info("Bot initialized successfully")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to initialize bot: {e}")
-        return False
+    """Initialize and start the bot with flood wait handling"""
+    max_retries = 3
+    current_retry = 0
+    
+    while current_retry < max_retries:
+        try:
+            if not bot.is_connected():
+                await bot.connect()
+            
+            if not await bot.is_user_authorized():
+                await bot.start(bot_token=bot_token)
+                
+            logger.info("Bot initialized successfully")
+            return True
+            
+        except FloodWaitError as e:
+            wait_time = e.seconds
+            logger.warning(f"Hit flood wait limit. Waiting {wait_time} seconds...")
+            await asyncio.sleep(wait_time)
+            current_retry += 1
+            
+        except AuthKeyError:
+            logger.error("Authentication key error. Recreating session...")
+            if bot.is_connected():
+                await bot.disconnect()
+            bot.session = MemorySession()
+            current_retry += 1
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize bot: {e}")
+            return False
+            
+    logger.error("Failed to initialize bot after maximum retries")
+    return False
 
 async def wait_for_db():
     """Wait for database to become available"""
@@ -121,10 +146,19 @@ async def lifespan(app: FastAPI):
         logger.info(f"API Hash present: {'Yes' if api_hash else 'No'}")
         logger.info(f"Bot Token present: {'Yes' if bot_token else 'No'}")
 
-        # Initialize bot first
-        logger.info("Initializing bot...")
-        if not await initialize_bot():
-            raise HTTPException(status_code=503, detail="Bot initialization failed")
+        # Initialize bot with retries
+        retry_count = 0
+        max_retries = 3
+        while retry_count < max_retries:
+            logger.info(f"Initializing bot (attempt {retry_count + 1}/{max_retries})...")
+            if await initialize_bot():
+                break
+            retry_count += 1
+            if retry_count < max_retries:
+                await asyncio.sleep(10)  # Wait between retries
+        
+        if retry_count == max_retries:
+            raise HTTPException(status_code=503, detail="Bot initialization failed after multiple attempts")
 
         # Check database connection
         logger.info("Checking database connection...")
@@ -235,7 +269,7 @@ async def handle_webhook(request: Request):
         return Response(status_code=500)
 
 # Modify the main part
-if __name__ == "__main__":
+if __name__ == "__main__": 
     try:
         uvicorn.run(
             "webhook_server:app",

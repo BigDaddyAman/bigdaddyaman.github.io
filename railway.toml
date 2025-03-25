@@ -6,9 +6,9 @@ buildCommand = "pip install -r requirements.txt"
 startCommand = "python webhook_server.py"
 healthcheckPath = "/"
 restartPolicyType = "on_failure"
-healthcheckTimeout = 300
-healthcheckInterval = 15
-healthcheckRetries = 5
+healthcheckTimeout = 600
+healthcheckInterval = 30
+healthcheckRetries = 3
 
 [service]
 port = 8000
