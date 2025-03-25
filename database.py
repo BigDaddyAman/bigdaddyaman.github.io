@@ -204,67 +204,54 @@ async def get_file_by_id(file_id: str) -> Optional[Tuple]:
 def cache_key(keyword_list_str: str, page_size: int, offset: int) -> str:
     return f"{keyword_list_str}:{page_size}:{offset}"
 
-# Modify search_files to prioritize exact matches and limit results
+# Update search function to be more efficient
 async def search_files(keyword_list: List[str], page_size: int, offset: int):
-    """Search files with caching"""
+    """Search files with improved performance"""
     cache_str = cache_key(','.join(sorted(keyword_list)), page_size, offset)
     
     conn = await connect_to_db()
     if not conn:
         return []
     try:
-        # Join original search phrase
-        original_phrase = ' '.join(keyword_list).lower()
-        
-        # Create normalized search patterns
-        exact_pattern = f"%{original_phrase}%"
-        words_pattern = ''.join(f"(?=.*{word})" for word in keyword_list)
-        
+        # Improved search query with better ranking
         query = """
-            WITH RankedResults AS (
+            WITH MATERIALIZED search_terms AS (
+                SELECT plainto_tsquery('english', $1) as query
+            ),
+            ranked_results AS (
                 SELECT 
                     id, 
                     caption, 
                     file_name,
-                    CASE 
-                        WHEN LOWER(file_name) = LOWER($1) THEN 100  -- Exact full match
-                        WHEN LOWER(file_name) LIKE LOWER($2) THEN 90  -- Contains exact phrase
-                        WHEN LOWER(file_name) ~ ALL($3::text[]) THEN 80  -- Contains all words in any order
-                        WHEN LOWER(caption) = LOWER($1) THEN 70  -- Exact caption match
-                        WHEN LOWER(caption) LIKE LOWER($2) THEN 60  -- Caption contains phrase
-                        WHEN LOWER(caption) ~ ALL($3::text[]) THEN 50  -- Caption contains all words
-                        ELSE 0
-                    END as relevance_score
+                    ts_rank_cd(
+                        setweight(to_tsvector('english', coalesce(file_name, '')), 'A') ||
+                        setweight(to_tsvector('english', coalesce(caption, '')), 'B'),
+                        (SELECT query FROM search_terms)
+                    ) as rank
                 FROM files 
                 WHERE 
-                    LOWER(file_name) ~ $4
-                    OR LOWER(caption) ~ $4
+                    to_tsvector('english', coalesce(file_name, '') || ' ' || coalesce(caption, '')) @@ 
+                    (SELECT query FROM search_terms)
+                    OR LOWER(file_name) LIKE LOWER($2)
+                    OR LOWER(caption) LIKE LOWER($2)
             )
-            SELECT 
+            SELECT DISTINCT 
                 id, 
                 caption, 
                 file_name,
-                relevance_score
-            FROM RankedResults 
-            WHERE relevance_score > 0
-            ORDER BY 
-                relevance_score DESC,
-                file_name ASC
-            LIMIT $5 OFFSET $6
+                rank
+            FROM ranked_results
+            ORDER BY rank DESC, file_name ASC
+            LIMIT $3 OFFSET $4
         """
         
-        # Create word patterns
-        word_patterns = [f"(?i){word}" for word in keyword_list]
-        combined_pattern = f".*{original_phrase}.*"
-        
+        search_pattern = f"%{' '.join(keyword_list)}%"
         results = await conn.fetch(
             query,
-            original_phrase,                    # $1: exact phrase
-            exact_pattern,                      # $2: LIKE pattern
-            word_patterns,                      # $3: array of word patterns
-            combined_pattern,                   # $4: regex pattern
-            page_size,                         # $5: limit
-            offset                             # $6: offset
+            ' '.join(keyword_list),
+            search_pattern,
+            page_size,
+            offset
         )
         
         return results

@@ -332,9 +332,8 @@ async def handle_callback_query(event, client):
 async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
     """Helper function to send or edit search results with improved pagination"""
     try:
-        # Prevent duplicate messages
-        chat_id = event.chat_id if hasattr(event, 'chat_id') else event.chat.id
-        cache_key = f"{chat_id}:{text}:{page}"
+        # Prevent duplicate messages with more robust cache key
+        cache_key = f"{event.chat_id}:{text}:{page}:{total_results}"
         if not is_edit and cache_key in _message_cache:
             return
         _message_cache[cache_key] = time.time()
@@ -353,7 +352,7 @@ async def send_search_results(event, text, video_results, page, total_pages, tot
                 website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
                 buttons.append([Button.url(display_name, website_link)])
 
-        # Add improved pagination with numbers
+        # Add improved pagination with numbers and First/Last buttons
         if total_pages > 1:
             nav = []
             
@@ -365,10 +364,12 @@ async def send_search_results(event, text, video_results, page, total_pages, tot
             if page > 1:
                 nav.append(Button.inline("‹", f"page|{text}|{page-1}"))
 
-            # Numbered pages
-            start_page = max(1, min(page - 2, total_pages - 4))
-            end_page = min(start_page + 4, total_pages)
-            
+            # Calculate page range for numbered buttons
+            visible_pages = 5
+            start_page = max(1, min(page - (visible_pages // 2), total_pages - visible_pages + 1))
+            end_page = min(start_page + visible_pages - 1, total_pages)
+
+            # Add numbered page buttons
             for p in range(start_page, end_page + 1):
                 if p == page:
                     nav.append(Button.inline(f"[{p}]", f"current|{p}"))
@@ -385,14 +386,22 @@ async def send_search_results(event, text, video_results, page, total_pages, tot
 
             buttons.append(nav)
 
-        # Send or edit message
-        try:
-            if is_edit:
-                await event.edit(header, buttons=buttons)
-            else:
-                await event.respond(header, buttons=buttons)
-        except errors.MessageNotModifiedError:
-            pass
+        # Send or edit message with retries
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if is_edit:
+                    await event.edit(header, buttons=buttons)
+                else:
+                    await event.respond(header, buttons=buttons)
+                break
+            except errors.MessageNotModifiedError:
+                break
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.error(f"Failed to send/edit message after {max_retries} attempts: {e}")
+                else:
+                    await asyncio.sleep(1)
 
     except Exception as e:
         logger.error(f"Error in send_search_results: {e}")
@@ -506,18 +515,14 @@ async def handle_webhook_message(data: dict, client):
 async def handle_webhook_callback(data: dict, client):
     """Handle webhook callback queries"""
     try:
-        query_id = data.get('id')
+        callback_data = data.get('data')
+        if isinstance(callback_data, bytes):
+            callback_data = callback_data.decode('utf-8')
+            
         message = data.get('message', {})
         chat_id = message.get('chat', {}).get('id')
         message_id = message.get('message_id')
         
-        callback_data = data.get('data', '')
-        if isinstance(callback_data, bytes):
-            callback_data = callback_data.decode('utf-8')
-            
-        if not all([query_id, chat_id, message_id, callback_data]):
-            return
-            
         if callback_data.startswith("page|"):
             parts = callback_data.split("|")
             if len(parts) != 3:
@@ -540,11 +545,12 @@ async def handle_webhook_callback(data: dict, client):
                 db_results = await search_files(keyword_list, page_size, offset)
                 video_results = [r for r in db_results if any(r[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
                 
+                # Use edit_message for pagination updates
                 if video_results:
                     buttons = []
                     header = f"🎬 {total_results} Results for '{text}'"
                     
-                    # Result buttons
+                    # Add result buttons
                     for result in video_results:
                         id, caption, file_name, rank = result
                         token = await store_token(str(id))
@@ -555,34 +561,38 @@ async def handle_webhook_callback(data: dict, client):
                             website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
                             buttons.append([Button.url(display_name, website_link)])
                     
-                    # Pagination
+                    # Add pagination buttons using the same format as send_search_results
                     if total_pages > 1:
                         nav = []
-                        nav.append(Button.inline("1️⃣", f"page|{text}|1"))
                         if page > 1:
-                            nav.append(Button.inline("⬅️", f"page|{text}|{page-1}"))
-                        nav.append(Button.inline(f"{page}/{total_pages}", f"current|{page}"))
-                        if page < total_pages:
-                            nav.append(Button.inline("➡️", f"page|{text}|{page+1}"))
-                        nav.append(Button.inline(f"{total_pages}️⃣", f"page|{text}|{total_pages}"))
-                        buttons.append(nav)
+                            nav.append(Button.inline("« First", f"page|{text}|1"))
+                            nav.append(Button.inline("‹", f"page|{text}|{page-1}"))
+                            
+                        visible_pages = 5
+                        start_page = max(1, min(page - (visible_pages // 2), total_pages - visible_pages + 1))
+                        end_page = min(start_page + visible_pages - 1, total_pages)
                         
-                    await client.edit_message(chat_id, message_id, header, buttons=buttons)
-                    await client.answer_callback_query(query_id)
-                    return
+                        for p in range(start_page, end_page + 1):
+                            if p == page:
+                                nav.append(Button.inline(f"[{p}]", f"current|{p}"))
+                            else:
+                                nav.append(Button.inline(str(p), f"page|{text}|{p}"))
+                                
+                        if page < total_pages:
+                            nav.append(Button.inline("›", f"page|{text}|{page+1}"))
+                            nav.append(Button.inline("Last »", f"page|{text}|{total_pages}"))
+                            
+                        buttons.append(nav)
                     
-            await client.answer_callback_query(query_id, "No more results", show_alert=True)
-            
-        elif callback_data.startswith("current|"):
-            page = callback_data.split("|")[1]
-            await client.answer_callback_query(query_id, f"Current page {page}", show_alert=True)
-            
+                    # Use raw API method to edit message
+                    try:
+                        await client.edit_message(chat_id, message_id, header, buttons=buttons)
+                    except Exception as e:
+                        logger.error(f"Error editing message: {e}")
+                        
     except Exception as e:
         logger.error(f"Webhook callback handler error: {e}")
-        if query_id:
-            await client.answer_callback_query(query_id, "Error processing request", show_alert=True)
 
-# Bot setup functions
 async def setup_webhook():
     """Set up webhook for the bot"""
     try:
