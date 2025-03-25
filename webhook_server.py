@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, Response, HTTPException
+from contextlib import asynccontextmanager
 import telegram_bot
 from telethon import events, types
 import logging
@@ -17,42 +18,43 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI
-app = FastAPI(title="Telegram Bot Webhook Server")
-
-# Bot settings
-PORT = int(os.getenv('PORT', 8080))
-WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', '')
-
-async def startup():
-    """Initialize bot and databases on startup"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for FastAPI application"""
     try:
         # Initialize the bot client
         client = await telegram_bot.initialize_client()
         if not client:
             raise Exception("Failed to initialize bot client")
             
-        # Set up bot event handlers
-        await telegram_bot.setup_bot_handlers(client)
-        
         # Initialize databases
         await init_db()
         await init_user_db()
         await init_premium_db()
         
+        # Set up bot event handlers
+        await telegram_bot.setup_bot_handlers(client)
+        
         # Set up webhook
         await telegram_bot.setup_webhook()
         
         logger.info("Startup complete")
-        return True
+        yield
     except Exception as e:
         logger.error(f"Startup failed: {e}")
-        return False
+        raise
+    finally:
+        # Cleanup
+        client = await telegram_bot.get_client()
+        if client:
+            await client.disconnect()
+            logger.info("Bot disconnected")
 
-@app.on_event("startup")
-async def on_startup():
-    if not await startup():
-        raise Exception("Failed to complete startup")
+# Update FastAPI initialization to use lifespan
+app = FastAPI(
+    title="Telegram Bot Webhook Server",
+    lifespan=lifespan
+)
 
 @app.get("/")
 async def health_check():

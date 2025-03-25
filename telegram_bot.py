@@ -1,3 +1,4 @@
+# Imports
 import logging
 from telethon import TelegramClient, events, Button, errors
 from telethon.tl.types import Document, DocumentAttributeFilename, InputPeerUser
@@ -33,35 +34,55 @@ from fastapi import FastAPI, Request
 from telethon.tl.functions.bots import SetBotCommandsRequest
 from telethon.tl.types import BotCommand
 
-# Load environment variables from .env file
-load_dotenv()
+# Initialize settings and client
+_client = None
+app = FastAPI()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,  # Change to INFO to reduce verbosity
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%H:%M:%S'
-)
+# Configure logging and load environment variables
+load_dotenv()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger(__name__)
 
-# Your API ID, hash, and bot token
+# Bot settings
 api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
+WEBHOOK_PATH = f"/webhook/{bot_token}"
+WEBHOOK_HOST = os.getenv('WEBHOOK_HOST', 'https://worker-production-0a82.up.railway.app')
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+PORT = int(os.getenv('PORT', 8000))
 
+# Constants
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
-
-# List of authorized user IDs
-AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and future moderator IDs
-
-# Add this constant near the top with other constants
-REQUIRED_CHANNEL = -1001457047091  # Use channel ID instead of username
-CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"  # Add invite link
-
-# Add bot username constant near the top with other constants
+AUTHORIZED_USER_IDS = [7951420571, 1509468839]
+REQUIRED_CHANNEL = -1001457047091
+CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"
 BOT_USERNAME = "@Kakifilemv1Bot"
 
-# Add this function near the top with other utility functions
+# Client management functions
+async def get_client():
+    """Get the current client instance"""
+    global _client
+    if not _client:
+        _client = await initialize_client()
+    return _client
+
+async def initialize_client():
+    """Initialize and return the Telegram client"""
+    global _client
+    if not _client:
+        _client = TelegramClient(
+            MemorySession(),
+            api_id,
+            api_hash,
+            system_version="4.16.30-vxCUSTOM",
+            device_model="Railway Server"
+        )
+        await _client.connect()
+        await _client.start(bot_token=bot_token)
+    return _client
+
+# Utility functions
 def format_filename(filename: str) -> str:
     """Format filename consistently when storing or displaying"""
     if not filename:
@@ -99,7 +120,6 @@ def format_filename(filename: str) -> str:
     
     return clean
 
-# Add this new function near other utility functions
 def format_caption(caption: str) -> str:
     """Format caption with dots instead of spaces and remove special characters"""
     if not caption:
@@ -130,7 +150,6 @@ def format_caption(caption: str) -> str:
     
     return clean
 
-# Add this new function near other utility functions
 def format_button_text(text: str) -> str:
     """Format button text to be concise with dots"""
     if not text:
@@ -195,20 +214,9 @@ async def is_user_in_channel(client, user_id):
         # If we can't verify, assume not in channel for safety
         return False
 
-# Initialize FastAPI
-app = FastAPI()
-
-# Update bot settings
-WEBHOOK_HOST = os.getenv('WEBHOOK_HOST', 'https://worker-production-0a82.up.railway.app')
-WEBHOOK_PATH = f"/webhook/{bot_token}"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-PORT = int(os.getenv('PORT', 8000))
-
-# Initialize bot globally
-client = None
-
-# Move handler functions outside of setup_bot_handlers
-async def start_handler(event):
+# Handler functions
+async def handle_start(event, client):
+    """Handle /start command"""
     if not await is_user_in_channel(client, event.sender_id):
         keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
         await event.reply(
@@ -226,9 +234,10 @@ async def start_handler(event):
         first_name=user.first_name,
         last_name=user.last_name
     )
-    await event.respond('Hantar movies apa yang anda mahu.')
+    await event.respond('Nak tengok movie apa hari ni? 🎥 Hanya taip tajuknya, dan saya akan carikan untuk anda!')
 
-async def message_handler(event):
+async def handle_messages(event, client):
+    """Handle incoming messages"""
     if event.is_private:
         if not await is_user_in_channel(client, event.sender_id):
             keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
@@ -246,47 +255,27 @@ async def message_handler(event):
             try:
                 text = normalize_keyword(event.message.text.lower().strip())
                 keyword_list = split_keywords(text)
-
                 page = 1
                 page_size = 10
                 offset = (page - 1) * page_size
-
+                
+                # Search and format results
                 db_results = await search_files(keyword_list, page_size, offset)
                 total_results = await count_search_results(keyword_list)
                 total_pages = math.ceil(total_results / page_size)
-
+                
                 video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-
+                
                 if video_results:
-                    header = f"{total_results} Results for '{text}'"
-                    buttons = []
-                    for result in video_results:
-                        id, caption, file_name, rank = result
-                        token = await store_token(str(id))
-                        if token:
-                            display_name = format_button_text(file_name or caption or "Unknown File")
-                            safe_video_name = urllib.parse.quote(file_name, safe='')
-                            safe_token = urllib.parse.quote(token, safe='')
-                            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                            buttons.append([Button.url(display_name, website_link)])
-                    
-                    if total_pages > 1:
-                        pagination = []
-                        if page > 1:
-                            pagination.append(Button.inline("⬅️ Prev", f"page|{text}|{page-1}"))
-                        pagination.append(Button.inline(f"Page {page}/{total_pages}", f"current|{page}"))
-                        if page < total_pages:
-                            pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
-                        buttons.append(pagination)
-
-                    await event.respond(header, buttons=buttons)
+                    await send_search_results(event, text, video_results, page, total_pages, total_results)
                 else:
                     await event.reply('Movies yang anda cari belum ada boleh request di @Request67_bot.')
             except Exception as e:
                 logger.error(f"Error handling text message: {e}")
                 await event.reply('Failed to process your request.')
 
-async def callback_query_handler(event):
+async def handle_callback_query(event, client):
+    """Handle callback queries"""
     try:
         data = event.data.decode('utf-8')
         if data.startswith("page|"):
@@ -305,28 +294,7 @@ async def callback_query_handler(event):
             video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
             
             if video_results:
-                header = f"{total_results} Results for '{text}'"
-                buttons = []
-                for result in video_results:
-                    id, caption, file_name, rank = result
-                    token = await store_token(str(id))
-                    if token:
-                        display_name = format_button_text(file_name or caption or "Unknown File")
-                        safe_video_name = urllib.parse.quote(file_name, safe='')
-                        safe_token = urllib.parse.quote(token, safe='')
-                        website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                        buttons.append([Button.url(display_name, website_link)])
-                
-                if total_pages > 1:
-                    pagination = []
-                    if page > 1:
-                        pagination.append(Button.inline("⬅️ Prev", f"page|{text}|{page-1}"))
-                    pagination.append(Button.inline(f"Page {page}/{total_pages}", f"current|{page}"))
-                    if page < total_pages:
-                        pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
-                    buttons.append(pagination)
-                
-                await event.edit(header, buttons=buttons)
+                await send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=True)
             else:
                 await event.answer("No more results")
         elif data.startswith("current|"):
@@ -335,20 +303,39 @@ async def callback_query_handler(event):
         logger.error(f"Error in callback handler: {e}")
         await event.answer("Error processing request", alert=True)
 
-async def initialize_client():
-    global client
-    if client is None:
-        client = TelegramClient(
-            MemorySession(),
-            api_id,
-            api_hash,
-            system_version="4.16.30-vxCUSTOM",
-            device_model="Railway Server"
-        )
-        await client.connect()
-        await client.start(bot_token=bot_token)
-    return client
+async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
+    """Helper function to send or edit search results"""
+    header = f"{total_results} Results for '{text}'"
+    buttons = []
+    
+    # Create result buttons
+    for result in video_results:
+        id, caption, file_name, rank = result
+        token = await store_token(str(id))
+        if token:
+            display_name = format_button_text(file_name or caption or "Unknown File")
+            safe_video_name = urllib.parse.quote(file_name, safe='')
+            safe_token = urllib.parse.quote(token, safe='')
+            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+            buttons.append([Button.url(display_name, website_link)])
+    
+    # Add pagination if needed
+    if total_pages > 1:
+        pagination = []
+        if page > 1:
+            pagination.append(Button.inline("⬅️ Prev", f"page|{text}|{page-1}"))
+        pagination.append(Button.inline(f"Page {page}/{total_pages}", f"current|{page}"))
+        if page < total_pages:
+            pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
+        buttons.append(pagination)
+    
+    # Send or edit message
+    if is_edit:
+        await event.edit(header, buttons=buttons)
+    else:
+        await event.respond(header, buttons=buttons)
 
+# Bot setup functions
 async def setup_webhook():
     """Set up webhook for the bot"""
     try:
@@ -380,191 +367,45 @@ async def setup_webhook():
         logger.error(f"Error setting webhook: {e}")
         return False
 
-async def init_bot():
-    """Initialize bot and set up webhook"""
-    try:
-        # Connect and start bot
-        await client.connect()
-        await client.start(bot_token=bot_token)
-        
-        # Set up bot commands
-        commands = [
-            BotCommand('start', 'Start the bot'),
-            BotCommand('stats', 'Show bot statistics'),
-            # Add other commands...
-        ]
-        
-        await client(SetBotCommandsRequest(
-            scope=types.BotCommandScopeDefault(),
-            lang_code='en',
-            commands=commands
-        ))
-        
-        # Set up webhook
-        if not await setup_webhook():
-            raise Exception("Failed to set up webhook")
-            
-        logger.info("Bot initialized successfully with webhook")
-        return True
-    except Exception as e:
-        logger.error(f"Bot initialization error: {e}")
-        return False
+async def setup_bot_handlers(client):
+    """Set up all bot event handlers"""
+    logger.info("Setting up bot handlers...")
+    
+    client.add_event_handler(
+        lambda e: handle_start(e, client),
+        events.NewMessage(pattern='/start')
+    )
+    
+    client.add_event_handler(
+        lambda e: handle_messages(e, client),
+        events.NewMessage
+    )
+    
+    client.add_event_handler(
+        lambda e: handle_callback_query(e, client),
+        events.CallbackQuery
+    )
+    
+    logger.info("Bot handlers set up successfully")
 
+# FastAPI endpoint
 @app.post(WEBHOOK_PATH)
 async def handle_webhook(request: Request):
     """Handle incoming webhook updates"""
     try:
         data = await request.json()
         update = types.Update.from_dict(data)
+        client = await get_client()
         
-        # Process different types of updates
         if update.message:
-            await handle_message(update.message)
+            await handle_messages(update.message, client)
         elif update.callback_query:
-            await handle_callback_query(update.callback_query)
+            await handle_callback_query(update.callback_query, client)
             
         return {"ok": True}
     except Exception as e:
         logger.error(f"Error handling webhook: {e}")
         return {"ok": False, "error": str(e)}
-
-# Move event handlers into a setup function
-async def setup_bot_handlers(client):
-    """Set up all bot event handlers"""
-    
-    @client.on(events.NewMessage(pattern='/start'))
-    async def start(event):
-        if not await is_user_in_channel(client, event.sender_id):
-            keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
-            await event.reply(
-                "⚠️ Welcome! You must join our channel first to use this bot!\n\n"
-                "1. Click the button below to join\n"
-                "2. After joining, come back and send /start again",
-                buttons=keyboard
-            )
-            return
-
-        user = event.sender
-        await add_user(
-            user_id=user.id,
-            username=user.username,
-            first_name=user.first_name,
-            last_name=user.last_name
-        )
-        await event.respond('Hantar movies apa yang anda mahu.')
-
-    @client.on(events.NewMessage)
-    async def handle_messages(event):
-        if event.is_private:
-            if not await is_user_in_channel(client, event.sender_id):
-                keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
-                await event.reply(
-                    "⚠️ You must join our channel first to use this bot!\n\n"
-                    "1. Click the button below to join\n"
-                    "2. After joining, come back and try again",
-                    buttons=keyboard
-                )
-                return
-
-            await update_user_activity(event.sender_id)
-            
-            if event.message.text and not event.message.text.startswith('/'):
-                try:
-                    text = normalize_keyword(event.message.text.lower().strip())
-                    keyword_list = split_keywords(text)
-
-                    page = 1
-                    page_size = 10
-                    offset = (page - 1) * page_size
-
-                    db_results = await search_files(keyword_list, page_size, offset)
-                    total_results = await count_search_results(keyword_list)
-                    total_pages = math.ceil(total_results / page_size)
-
-                    video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-
-                    if video_results:
-                        header = f"{total_results} Results for '{text}'"
-                        buttons = []
-                        for result in video_results:
-                            id, caption, file_name, rank = result
-                            token = await store_token(str(id))
-                            if token:
-                                display_name = format_button_text(file_name or caption or "Unknown File")
-                                safe_video_name = urllib.parse.quote(file_name, safe='')
-                                safe_token = urllib.parse.quote(token, safe='')
-                                website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                                buttons.append([Button.url(display_name, website_link)])
-                        
-                        if total_pages > 1:
-                            pagination = []
-                            if page > 1:
-                                pagination.append(Button.inline("⬅️ Prev", f"page|{text}|{page-1}"))
-                            pagination.append(Button.inline(f"Page {page}/{total_pages}", f"current|{page}"))
-                            if page < total_pages:
-                                pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
-                            buttons.append(pagination)
-
-                        await event.respond(header, buttons=buttons)
-                    else:
-                        await event.reply('Movies yang anda cari belum ada boleh request di @Request67_bot.')
-                except Exception as e:
-                    logger.error(f"Error handling text message: {e}")
-                    await event.reply('Failed to process your request.')
-
-    @client.on(events.CallbackQuery)
-    async def callback_handler(event):
-        try:
-            data = event.data.decode('utf-8')
-            if data.startswith("page|"):
-                parts = data.split("|")
-                text = parts[1]
-                page = int(parts[2])
-                
-                page_size = 10
-                offset = (page - 1) * page_size
-                
-                keyword_list = split_keywords(text)
-                db_results = await search_files(keyword_list, page_size, offset)
-                total_results = await count_search_results(keyword_list)
-                total_pages = math.ceil(total_results / page_size)
-                
-                video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-                
-                if video_results:
-                    header = f"{total_results} Results for '{text}'"
-                    buttons = []
-                    for result in video_results:
-                        id, caption, file_name, rank = result
-                        token = await store_token(str(id))
-                        if token:
-                            display_name = format_button_text(file_name or caption or "Unknown File")
-                            safe_video_name = urllib.parse.quote(file_name, safe='')
-                            safe_token = urllib.parse.quote(token, safe='')
-                            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                            buttons.append([Button.url(display_name, website_link)])
-                    
-                    if total_pages > 1:
-                        pagination = []
-                        if page > 1:
-                            pagination.append(Button.inline("⬅️ Prev", f"page|{text}|{page-1}"))
-                        pagination.append(Button.inline(f"Page {page}/{total_pages}", f"current|{page}"))
-                        if page < total_pages:
-                            pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
-                        buttons.append(pagination)
-                    
-                    await event.edit(header, buttons=buttons)
-                else:
-                    await event.answer("No more results")
-            elif data.startswith("current|"):
-                await event.answer(f"Current page {data.split('|')[1]}")
-        except Exception as e:
-            logger.error(f"Error in callback handler: {e}")
-            await event.answer("Error processing request", alert=True)
-
-    # Add any other event handlers here
-
-    logger.info("Bot handlers set up successfully")
 
 # Update main function to use FastAPI
 async def main():
@@ -606,64 +447,14 @@ if __name__ == "__main__":
         logger.error(f"Fatal error: {str(e)}", exc_info=True)
         raise
 
-# Move client declaration to top
-from telethon import TelegramClient, events
-import os
-from dotenv import load_dotenv
+# Export needed functions and variables for webhook_server.py
+__all__ = [
+    'initialize_client',
+    'setup_bot_handlers',
+    'setup_webhook',
+    'get_client',
+    'WEBHOOK_PATH',
+    'handle_messages',
+    'handle_callback_query'
+]
 
-# Load environment variables
-load_dotenv()
-
-# Bot settings
-api_id = int(os.getenv('API_ID'))
-api_hash = os.getenv('API_HASH')
-bot_token = os.getenv('BOT_TOKEN')
-WEBHOOK_PATH = f"/webhook/{bot_token}"
-
-# Initialize client as None at module level
-_client = None
-
-async def get_client():
-    """Get the current client instance"""
-    global _client
-    if not _client:
-        _client = await initialize_client()
-    return _client
-
-async def initialize_client():
-    """Initialize and return the Telegram client"""
-    global _client
-    if not _client:
-        _client = TelegramClient(
-            MemorySession(),
-            api_id,
-            api_hash,
-            system_version="4.16.30-vxCUSTOM",
-            device_model="Railway Server"
-        )
-        await _client.connect()
-        await _client.start(bot_token=bot_token)
-    return _client
-
-# Move all your existing handler functions here, but remove @client decorators
-# Instead, we'll register them in setup_bot_handlers
-
-async def setup_bot_handlers(client):
-    """Set up all bot event handlers"""
-    # Register message handlers
-    client.add_event_handler(
-        start_handler,
-        events.NewMessage(pattern='/start')
-    )
-    
-    client.add_event_handler(
-        handle_messages,
-        events.NewMessage
-    )
-    
-    client.add_event_handler(
-        callback_handler,
-        events.CallbackQuery
-    )
-    
-    # ... rest of your existing telegram_bot.py code ...
