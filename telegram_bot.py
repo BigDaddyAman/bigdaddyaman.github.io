@@ -304,118 +304,61 @@ async def handle_webhook(request: Request):
         logger.error(f"Error handling webhook: {e}")
         return {"ok": False, "error": str(e)}
 
-# Update main function to use FastAPI
-async def main():
-    try:
-        # Initialize bot and webhook
-        if not await init_bot():
-            raise Exception("Bot initialization failed")
+# Move event handlers into a setup function
+async def setup_bot_handlers(client):
+    """Set up all bot event handlers"""
+    
+    @client.on(events.NewMessage(pattern='/start'))
+    async def start(event):
+        if not await is_user_in_channel(client, event.sender_id):
+            keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
+            await event.reply(
+                "⚠️ Welcome! You must join our channel first to use this bot!\n\n"
+                "1. Click the button below to join\n"
+                "2. After joining, come back and send /start again",
+                buttons=keyboard
+            )
+            return
 
-        # Initialize databases
-        await init_db()
-        await init_user_db()
-        await init_premium_db()
-        
-        # Event handlers
-        @client.on(events.NewMessage(pattern='/start'))
-        async def start(event):
+        user = event.sender
+        await add_user(
+            user_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
+        await event.respond('Hantar movies apa yang anda mahu.')
+
+    @client.on(events.NewMessage)
+    async def handle_messages(event):
+        if event.is_private:
             if not await is_user_in_channel(client, event.sender_id):
                 keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
                 await event.reply(
-                    "⚠️ Welcome! You must join our channel first to use this bot!\n\n"
+                    "⚠️ You must join our channel first to use this bot!\n\n"
                     "1. Click the button below to join\n"
-                    "2. After joining, come back and send /start again",
+                    "2. After joining, come back and try again",
                     buttons=keyboard
                 )
                 return
 
-            user = event.sender
-            await add_user(
-                user_id=user.id,
-                username=user.username,
-                first_name=user.first_name,
-                last_name=user.last_name
-            )
-            await event.respond('Hantar movies apa yang anda mahu.')
+            await update_user_activity(event.sender_id)
+            
+            if event.message.text and not event.message.text.startswith('/'):
+                try:
+                    text = normalize_keyword(event.message.text.lower().strip())
+                    keyword_list = split_keywords(text)
 
-        @client.on(events.NewMessage)
-        async def handle_messages(event):
-            if event.is_private:
-                if not await is_user_in_channel(client, event.sender_id):
-                    keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
-                    await event.reply(
-                        "⚠️ You must join our channel first to use this bot!\n\n"
-                        "1. Click the button below to join\n"
-                        "2. After joining, come back and try again",
-                        buttons=keyboard
-                    )
-                    return
-
-                await update_user_activity(event.sender_id)
-                
-                if event.message.text and not event.message.text.startswith('/'):
-                    try:
-                        text = normalize_keyword(event.message.text.lower().strip())
-                        keyword_list = split_keywords(text)
-
-                        page = 1
-                        page_size = 10
-                        offset = (page - 1) * page_size
-
-                        db_results = await search_files(keyword_list, page_size, offset)
-                        total_results = await count_search_results(keyword_list)
-                        total_pages = math.ceil(total_results / page_size)
-
-                        video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-
-                        if video_results:
-                            header = f"{total_results} Results for '{text}'"
-                            buttons = []
-                            for result in video_results:
-                                id, caption, file_name, rank = result
-                                token = await store_token(str(id))
-                                if token:
-                                    display_name = format_button_text(file_name or caption or "Unknown File")
-                                    safe_video_name = urllib.parse.quote(file_name, safe='')
-                                    safe_token = urllib.parse.quote(token, safe='')
-                                    website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                                    buttons.append([Button.url(display_name, website_link)])
-                            
-                            if total_pages > 1:
-                                pagination = []
-                                if page > 1:
-                                    pagination.append(Button.inline("⬅️ Prev", f"page|{text}|{page-1}"))
-                                pagination.append(Button.inline(f"Page {page}/{total_pages}", f"current|{page}"))
-                                if page < total_pages:
-                                    pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
-                                buttons.append(pagination)
-
-                            await event.respond(header, buttons=buttons)
-                        else:
-                            await event.reply('Movies yang anda cari belum ada boleh request di @Request67_bot.')
-                    except Exception as e:
-                        logger.error(f"Error handling text message: {e}")
-                        await event.reply('Failed to process your request.')
-
-        @client.on(events.CallbackQuery)
-        async def callback_handler(event):
-            try:
-                data = event.data.decode('utf-8')
-                if data.startswith("page|"):
-                    parts = data.split("|")
-                    text = parts[1]
-                    page = int(parts[2])
-                    
+                    page = 1
                     page_size = 10
                     offset = (page - 1) * page_size
-                    
-                    keyword_list = split_keywords(text)
+
                     db_results = await search_files(keyword_list, page_size, offset)
                     total_results = await count_search_results(keyword_list)
                     total_pages = math.ceil(total_results / page_size)
-                    
+
                     video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-                    
+
                     if video_results:
                         header = f"{total_results} Results for '{text}'"
                         buttons = []
@@ -437,15 +380,81 @@ async def main():
                             if page < total_pages:
                                 pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
                             buttons.append(pagination)
-                        
-                        await event.edit(header, buttons=buttons)
+
+                        await event.respond(header, buttons=buttons)
                     else:
-                        await event.answer("No more results")
-                elif data.startswith("current|"):
-                    await event.answer(f"Current page {data.split('|')[1]}")
-            except Exception as e:
-                logger.error(f"Error in callback handler: {e}")
-                await event.answer("Error processing request", alert=True)
+                        await event.reply('Movies yang anda cari belum ada boleh request di @Request67_bot.')
+                except Exception as e:
+                    logger.error(f"Error handling text message: {e}")
+                    await event.reply('Failed to process your request.')
+
+    @client.on(events.CallbackQuery)
+    async def callback_handler(event):
+        try:
+            data = event.data.decode('utf-8')
+            if data.startswith("page|"):
+                parts = data.split("|")
+                text = parts[1]
+                page = int(parts[2])
+                
+                page_size = 10
+                offset = (page - 1) * page_size
+                
+                keyword_list = split_keywords(text)
+                db_results = await search_files(keyword_list, page_size, offset)
+                total_results = await count_search_results(keyword_list)
+                total_pages = math.ceil(total_results / page_size)
+                
+                video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+                
+                if video_results:
+                    header = f"{total_results} Results for '{text}'"
+                    buttons = []
+                    for result in video_results:
+                        id, caption, file_name, rank = result
+                        token = await store_token(str(id))
+                        if token:
+                            display_name = format_button_text(file_name or caption or "Unknown File")
+                            safe_video_name = urllib.parse.quote(file_name, safe='')
+                            safe_token = urllib.parse.quote(token, safe='')
+                            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                            buttons.append([Button.url(display_name, website_link)])
+                    
+                    if total_pages > 1:
+                        pagination = []
+                        if page > 1:
+                            pagination.append(Button.inline("⬅️ Prev", f"page|{text}|{page-1}"))
+                        pagination.append(Button.inline(f"Page {page}/{total_pages}", f"current|{page}"))
+                        if page < total_pages:
+                            pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
+                        buttons.append(pagination)
+                    
+                    await event.edit(header, buttons=buttons)
+                else:
+                    await event.answer("No more results")
+            elif data.startswith("current|"):
+                await event.answer(f"Current page {data.split('|')[1]}")
+        except Exception as e:
+            logger.error(f"Error in callback handler: {e}")
+            await event.answer("Error processing request", alert=True)
+
+    # Add any other event handlers here
+
+    logger.info("Bot handlers set up successfully")
+
+# Update main function to use FastAPI
+async def main():
+    try:
+        # Initialize bot and webhook
+        if not await init_bot():
+            raise Exception("Bot initialization failed")
+
+        # Initialize databases
+        await init_db()
+        await init_user_db()
+        await init_premium_db()
+        
+        await setup_bot_handlers(client)
 
         # Start FastAPI server
         import uvicorn

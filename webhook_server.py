@@ -15,6 +15,7 @@ import asyncpg
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi.responses import JSONResponse
+from telegram_bot import setup_bot_handlers, client  # Add this import
 
 # Load environment variables
 load_dotenv()
@@ -179,6 +180,9 @@ async def lifespan(app: FastAPI):
         while retry_count < max_retries:
             logger.info(f"Initializing bot (attempt {retry_count + 1}/{max_retries})...")
             if await initialize_bot():
+                # Set up bot event handlers
+                await setup_bot_handlers(client)
+                logger.info("Bot handlers initialized")
                 break
             retry_count += 1
             if retry_count < max_retries:
@@ -308,18 +312,32 @@ async def handle_webhook(request: Request):
         logger.error(f"Error handling webhook: {e}")
         return Response(status_code=500)
 
-# Modify the main part
-if __name__ == "__main__": 
-    try:
-        uvicorn.run(
+# Update main to run both bot and web server
+if __name__ == "__main__":
+    import asyncio
+    import uvicorn
+    
+    async def run_server():
+        config = uvicorn.Config(
             "webhook_server:app",
             host="0.0.0.0",
-            port=PORT,  # Use updated port
-            workers=1,
-            loop="asyncio",
-            log_level="info",
-            reload=False
+            port=PORT,
+            log_level="info"
         )
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    async def main():
+        # Run both the bot and the web server
+        await asyncio.gather(
+            run_server(),
+            client.run_until_disconnected()
+        )
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
     except Exception as e:
-        logger.error(f"Server startup error: {e}")
+        logger.error(f"Fatal error: {str(e)}")
         raise
