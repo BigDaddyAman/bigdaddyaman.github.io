@@ -27,7 +27,8 @@ from telethon.tl.types import (
 )
 
 from telethon.tl.functions.channels import GetParticipantRequest
-from aiohttp import web
+from fastapi import FastAPI, Request
+import uvicorn
 from redis_cache import RedisCache
 import json
 
@@ -222,16 +223,6 @@ async def error_handler(event):
     except Exception as e:
         logger.error(f"Uncaught error: {str(e)}", exc_info=True)
 
-async def handle_webhook(request):
-    try:
-        data = await request.json()
-        await client.catch_up()
-        await client._handle_update(data)
-        return web.Response(status=200)
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return web.Response(status=500)
-
 async def setup_webhook():
     """Configure webhook settings"""
     try:
@@ -276,27 +267,34 @@ async def main():
         await init_db()
         await init_user_db()
         await init_premium_db()
-        await redis_cache.init()
+        
+        # Create FastAPI app
+        app = FastAPI()
+        
+        @app.post(WEBHOOK_PATH)
+        async def handle_webhook(request: Request):
+            try:
+                data = await request.json()
+                await client.catch_up()
+                await client._handle_update(data)
+                return {"status": "ok"}
+            except Exception as e:
+                logger.error(f"Webhook error: {e}")
+                return {"status": "error", "message": str(e)}
 
         # Setup webhook
         await setup_webhook()
         
-        # Setup aiohttp server
-        app = web.Application()
-        app.router.add_post(WEBHOOK_PATH, handle_webhook)
+        # Start FastAPI server
+        config = uvicorn.Config(
+            app=app,
+            host="0.0.0.0",
+            port=PORT,
+            log_level="info"
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
         
-        # Start the server
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
-        await site.start()
-        
-        logger.info(f"Webhook server started on port {PORT}")
-        
-        # Keep the server running
-        while True:
-            await asyncio.sleep(3600)  # Sleep for 1 hour
-            
     except Exception as e:
         logger.error(f"Critical error in main: {str(e)}", exc_info=True)
         raise

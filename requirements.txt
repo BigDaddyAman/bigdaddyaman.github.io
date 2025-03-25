@@ -1,8 +1,9 @@
-asyncio
+fastapi>=0.68.0
+uvicorn>=0.15.0
 telethon
-psycopg2
+psycopg2-binary
 python-dotenv
 asyncpg
-aiohttp
-aioredis>=2.0.0
-aiohttp>=3.8.1
+redis>=4.0.0
+python-multipart
+setuptools
