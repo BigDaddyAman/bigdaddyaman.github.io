@@ -68,6 +68,24 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_tokens_file_id 
             ON tokens(file_id)
         ''')
+        
+        # Add additional indexes for faster searches
+        await conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_files_file_name_lower 
+            ON files (lower(file_name));
+        ''')
+        
+        await conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_files_caption_lower 
+            ON files (lower(caption));
+        ''')
+        
+        # Add index for full text search
+        await conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_files_full_text 
+            ON files USING gin(to_tsvector('english', coalesce(file_name, '') || ' ' || coalesce(caption, '')));
+        ''')
+        
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         raise

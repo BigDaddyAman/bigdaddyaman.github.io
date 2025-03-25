@@ -30,6 +30,7 @@ from premium import init_premium_db, is_premium, add_or_renew_premium, get_premi
 from functools import lru_cache
 from typing import Dict, Set
 import time
+from telethon.tl.functions.messages import SetBotCallbackAnswerRequest
 
 # Load environment variables and configure logging
 load_dotenv()
@@ -295,38 +296,48 @@ async def handle_callback_query(event, client):
     """Handle callback queries"""
     try:
         data = event.data.decode('utf-8')
+        
         if data.startswith("page|"):
             parts = data.split("|")
             text = parts[1]
             page = int(parts[2])
-            page_size = 10
-            offset = (page - 1) * page_size
             
-            keyword_list = split_keywords(text)
-            db_results = await search_files(keyword_list, page_size, offset)
-            total_results = await count_search_results(keyword_list)
-            total_pages = math.ceil(total_results / page_size)
-            video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+            # Process page change
+            await process_page_change(event, text, page)
             
-            if video_results:
-                await send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=True)
-            else:
-                await event.answer("No more results")
+            # Answer callback query using Telethon's method
+            try:
+                await event(SetBotCallbackAnswerRequest(
+                    query_id=int(event.query.id),
+                    message="",
+                    alert=False
+                ))
+            except Exception as e:
+                logger.error(f"Error answering callback: {e}")
+                
         elif data.startswith("current|"):
-            await event.answer(f"Current page {data.split('|')[1]}")
+            # Answer current page callback
+            try:
+                await event(SetBotCallbackAnswerRequest(
+                    query_id=int(event.query.id),
+                    message=f"Current page {data.split('|')[1]}",
+                    alert=True
+                ))
+            except Exception as e:
+                logger.error(f"Error answering current page callback: {e}")
+                
     except Exception as e:
         logger.error(f"Error in callback handler: {e}")
-        await event.answer("Error processing request", alert=True)
 
 async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
-    """Helper function to send or edit search results"""
+    """Helper function to send or edit search results with improved pagination"""
     try:
-        # Check for duplicate message if not editing
-        if not is_edit:
-            chat_id = event.chat_id if hasattr(event, 'chat_id') else event.chat.id
-            if is_duplicate_message(chat_id, f"{text}:{page}"):
-                logger.info(f"Skipping duplicate message for {text} page {page}")
-                return
+        # Prevent duplicate messages
+        chat_id = event.chat_id if hasattr(event, 'chat_id') else event.chat.id
+        cache_key = f"{chat_id}:{text}:{page}"
+        if not is_edit and cache_key in _message_cache:
+            return
+        _message_cache[cache_key] = time.time()
 
         header = f"🎬 {total_results} Results for '{text}'"
         buttons = []
@@ -342,36 +353,67 @@ async def send_search_results(event, text, video_results, page, total_pages, tot
                 website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
                 buttons.append([Button.url(display_name, website_link)])
 
-        # Add pagination
+        # Add improved pagination with numbers
         if total_pages > 1:
             nav = []
-            # First and Previous
+            
+            # First page button
             if page > 1:
-                nav.extend([
-                    Button.inline("⏮️", f"page|{text}|1"),
-                    Button.inline("◀️", f"page|{text}|{page-1}")
-                ])
+                nav.append(Button.inline("« First", f"page|{text}|1"))
+
+            # Previous page button
+            if page > 1:
+                nav.append(Button.inline("‹", f"page|{text}|{page-1}"))
+
+            # Numbered pages
+            start_page = max(1, min(page - 2, total_pages - 4))
+            end_page = min(start_page + 4, total_pages)
             
-            # Current page
-            nav.append(Button.inline(f"[{page}/{total_pages}]", f"current|{page}"))
-            
-            # Next and Last
+            for p in range(start_page, end_page + 1):
+                if p == page:
+                    nav.append(Button.inline(f"[{p}]", f"current|{p}"))
+                else:
+                    nav.append(Button.inline(str(p), f"page|{text}|{p}"))
+
+            # Next page button
             if page < total_pages:
-                nav.extend([
-                    Button.inline("▶️", f"page|{text}|{page+1}"),
-                    Button.inline("⏭️", f"page|{text}|{total_pages}")
-                ])
-            
+                nav.append(Button.inline("›", f"page|{text}|{page+1}"))
+
+            # Last page button
+            if page < total_pages:
+                nav.append(Button.inline("Last »", f"page|{text}|{total_pages}"))
+
             buttons.append(nav)
 
         # Send or edit message
-        if is_edit:
-            await event.edit(header, buttons=buttons)
-        else:
-            await event.respond(header, buttons=buttons)
+        try:
+            if is_edit:
+                await event.edit(header, buttons=buttons)
+            else:
+                await event.respond(header, buttons=buttons)
+        except errors.MessageNotModifiedError:
+            pass
 
     except Exception as e:
         logger.error(f"Error in send_search_results: {e}")
+
+async def process_page_change(event, text, page):
+    """Process page change requests"""
+    try:
+        page_size = 10
+        offset = (page - 1) * page_size
+        
+        keyword_list = split_keywords(text)
+        db_results = await search_files(keyword_list, page_size, offset)
+        total_results = await count_search_results(keyword_list)
+        total_pages = math.ceil(total_results / page_size)
+        video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+        
+        if video_results:
+            await send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=True)
+            
+    except Exception as e:
+        logger.error(f"Error processing page change: {e}")
 
 async def handle_webhook_message(data: dict, client):
     """Handle webhook message updates"""
@@ -643,4 +685,32 @@ __all__ = [
     'handle_callback_query',
     'PORT'
 ]
+
+# Add back the broadcast command
+@client.on(events.NewMessage(pattern='/broadcast'))
+async def broadcast_command(event):
+    """Handle broadcast command"""
+    if event.sender_id not in AUTHORIZED_USER_IDS:
+        await event.reply("You are not authorized to use this command.")
+        return
+        
+    # ... rest of your existing broadcast command code ...
+
+# Add back the renew command
+@client.on(events.NewMessage(pattern='/renew'))
+async def renew_command(event):
+    """Handle renew command"""
+    if event.sender_id not in AUTHORIZED_USER_IDS:
+        await event.reply("You are not authorized to use this command.")
+        return
+        
+    # ... rest of your existing renew command code ...
+
+# Update message cache cleanup
+def cleanup_message_cache():
+    """Clean up old message cache entries"""
+    current_time = time.time()
+    expired_keys = [k for k, v in _message_cache.items() if current_time - v > 30]
+    for k in expired_keys:
+        _message_cache.pop(k, None)
 
