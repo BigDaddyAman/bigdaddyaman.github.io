@@ -31,6 +31,7 @@ from functools import lru_cache
 from typing import Dict, Set
 import time
 from telethon.tl.functions.messages import SetBotCallbackAnswerRequest
+from redis_cache import redis_cache  # Add this line
 
 # Load environment variables and configure logging
 load_dotenv()
