@@ -6,6 +6,7 @@ import logging
 import os
 from dotenv import load_dotenv
 import asyncio
+import aiohttp
 from database import init_db
 from userdb import init_user_db
 from premium import init_premium_db
@@ -86,6 +87,30 @@ async def check_bot_auth():
         logger.error(f"Bot auth check failed: {e}")
         return False
 
+async def get_webhook_info():
+    """Get current webhook info using Telegram Bot API"""
+    async with aiohttp.ClientSession() as session:
+        url = f"https://api.telegram.org/bot{bot_token}/getWebhookInfo"
+        async with session.get(url) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data.get('result', {}).get('url', '')
+            return None
+
+async def set_webhook(url: str):
+    """Set webhook using Telegram Bot API"""
+    async with aiohttp.ClientSession() as session:
+        api_url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
+        params = {
+            'url': url,
+            'allowed_updates': ['message', 'callback_query']
+        }
+        async with session.post(api_url, json=params) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data.get('ok', False)
+            return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -118,11 +143,13 @@ async def lifespan(app: FastAPI):
         retries = 3
         while retries > 0 and not webhook_success:
             try:
-                webhook_info = await bot.get_webhook_info()
-                if (webhook_info.url != f"{WEBHOOK_URL}{WEBHOOK_PATH}"):
-                    success = await bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+                current_webhook = await get_webhook_info()
+                webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
+                
+                if current_webhook != webhook_url:
+                    success = await set_webhook(webhook_url)
                     if success:
-                        logger.info(f"Webhook set to: {WEBHOOK_URL}{WEBHOOK_PATH}")
+                        logger.info(f"Webhook set to: {webhook_url}")
                         webhook_success = True
                     else:
                         raise Exception("Webhook setting returned False")
@@ -176,8 +203,8 @@ async def health_check():
             health["checks"]["bot"] = True
             
         # Check webhook
-        webhook_info = await bot.get_webhook_info()
-        if webhook_info.url == f"{WEBHOOK_URL}{WEBHOOK_PATH}":
+        current_webhook = await get_webhook_info()
+        if current_webhook == f"{WEBHOOK_URL}{WEBHOOK_PATH}":
             health["checks"]["webhook"] = True
             
         # Overall health status
