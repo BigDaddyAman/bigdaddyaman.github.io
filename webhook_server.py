@@ -9,6 +9,7 @@ from database import init_db
 from userdb import init_user_db
 from premium import init_premium_db
 import asyncpg
+from contextlib import asynccontextmanager
 
 # Load environment variables
 load_dotenv()
@@ -31,7 +32,17 @@ WEBHOOK_PATH = f"/webhook/{bot_token}"
 PORT = int(os.getenv('PORT', 8000))
 
 # Initialize bot
-bot = TelegramClient('bot', api_id, api_hash).start(bot_token=bot_token)
+bot = TelegramClient(
+    'bot_session', 
+    api_id, 
+    api_hash,
+    system_version="4.16.30-vxCUSTOM",
+    device_model="Railway Server"
+)
+
+# Add this line after bot initialization
+loop = asyncio.get_event_loop()
+loop.run_until_complete(bot.start(bot_token=bot_token))
 
 async def wait_for_db():
     """Wait for database to become available"""
@@ -65,9 +76,8 @@ async def check_bot_auth():
         logger.error(f"Bot auth check failed: {e}")
         return False
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize everything on startup with proper checks"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     try:
         # Print environment variables (without sensitive data)
         logger.info(f"Starting bot with webhook URL: {WEBHOOK_URL}")
@@ -82,39 +92,32 @@ async def startup_event():
             logger.error("Database connection failed!")
             raise HTTPException(status_code=503, detail="Database unavailable")
 
-        # Initialize bot connection first
-        logger.info("Initializing bot connection...")
-        try:
-            await bot.connect()
-            me = await bot.get_me()
-            if not me:
-                raise Exception("Bot authentication failed")
-            logger.info(f"Bot connected successfully as @{me.username}")
-        except Exception as e:
-            logger.error(f"Bot connection failed: {e}")
-            raise HTTPException(status_code=503, detail=f"Bot connection failed: {str(e)}")
-
-        # Now initialize databases
+        # Initialize databases
         logger.info("Initializing databases...")
         await init_db()
         await init_user_db()
         await init_premium_db()
+
+        # Check bot connection
+        logger.info("Checking bot connection...")
+        if not bot.is_connected():
+            await bot.connect()
         
-        # Set webhook with better error handling
-        logger.info("Setting up webhook...")
+        me = await bot.get_me()
+        if not me:
+            raise Exception("Bot authentication failed")
+        logger.info(f"Bot connected successfully as @{me.username}")
+        
+        # Set webhook with retries
         webhook_success = False
         retries = 3
         while retries > 0 and not webhook_success:
             try:
                 webhook_info = await bot.get_webhook_info()
-                current_url = webhook_info.url if webhook_info else None
-                logger.info(f"Current webhook URL: {current_url}")
-                
-                if current_url != f"{WEBHOOK_URL}{WEBHOOK_PATH}":
-                    full_webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
-                    success = await bot.set_webhook(url=full_webhook_url)
+                if webhook_info.url != f"{WEBHOOK_URL}{WEBHOOK_PATH}":
+                    success = await bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
                     if success:
-                        logger.info(f"Webhook set to: {full_webhook_url}")
+                        logger.info(f"Webhook set to: {WEBHOOK_URL}{WEBHOOK_PATH}")
                         webhook_success = True
                     else:
                         raise Exception("Webhook setting returned False")
@@ -128,20 +131,24 @@ async def startup_event():
                 if retries == 0:
                     raise HTTPException(status_code=503, detail=f"Failed to set webhook: {str(e)}")
                 await asyncio.sleep(5)
-
-        logger.info("Bot initialization completed successfully!")
-    except Exception as e:
-        logger.error(f"Startup error: {e}")
-        raise HTTPException(status_code=503, detail=str(e))
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    try:
+                
+        yield
+        
+        # Cleanup
         await bot.disconnect()
         logger.info("Bot disconnected")
+        
     except Exception as e:
-        logger.error(f"Shutdown error: {e}")
+        logger.error(f"Startup error: {e}")
+        if bot and bot.is_connected():
+            await bot.disconnect()
+        raise
+
+# Update FastAPI initialization to use lifespan
+app = FastAPI(
+    title="Telegram Bot Webhook Server",
+    lifespan=lifespan
+)
 
 @app.get("/")
 async def health_check():
