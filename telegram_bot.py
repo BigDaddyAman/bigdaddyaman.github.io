@@ -52,6 +52,8 @@ AUTHORIZED_USER_IDS = [7951420571, 1509468839]
 REQUIRED_CHANNEL = -1001457047091
 CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"
 BOT_USERNAME = "@Kakifilemv1Bot"
+BACKUP_CHANNEL_ID = -1002647276011  # Your backup channel ID
+RESULTS_PER_PAGE = 10
 
 # Client management functions
 async def get_client():
@@ -289,10 +291,11 @@ async def handle_callback_query(event, client):
         await event.answer("Error processing request", alert=True)
 
 async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
-    """Helper function to send or edit search results"""
-    header = f"{total_results} Results for '{text}'"
-    # Create result buttons
+    """Helper function to send or edit search results with improved pagination"""
+    header = f"🎬 {total_results} Results for '{text}'"
     buttons = []
+
+    # Create result buttons
     for result in video_results:
         id, caption, file_name, rank = result
         display_name = format_button_text(file_name or caption or "Unknown File")
@@ -303,21 +306,39 @@ async def send_search_results(event, text, video_results, page, total_pages, tot
             website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
             buttons.append([Button.url(display_name, website_link)])
     
-    # Add pagination if needed
+    # Add improved pagination
     if total_pages > 1:
         pagination = []
+        
+        # First page
         if page > 1:
-            pagination.append(Button.inline("⬅️ Prev", f"page|{text}|{page-1}"))
-        pagination.append(Button.inline(f"Page {page}/{total_pages}", f"current|{page}"))
+            pagination.append(Button.inline("⏮️", f"page|{text}|1"))
+        
+        # Previous page
+        if page > 1:
+            pagination.append(Button.inline("◀️", f"page|{text}|{page-1}"))
+        
+        # Current page indicator
+        pagination.append(Button.inline(f"📖 {page}/{total_pages}", f"current|{page}"))
+        
+        # Next page
         if page < total_pages:
-            pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
+            pagination.append(Button.inline("▶️", f"page|{text}|{page+1}"))
+        
+        # Last page
+        if page < total_pages:
+            pagination.append(Button.inline("⏭️", f"page|{text}|{total_pages}"))
+        
         buttons.append(pagination)
     
     # Send or edit message
-    if is_edit:
-        await event.edit(header, buttons=buttons)
-    else:
-        await event.respond(header, buttons=buttons)
+    try:
+        if is_edit:
+            await event.edit(header, buttons=buttons)
+        else:
+            await event.respond(header, buttons=buttons)
+    except Exception as e:
+        logger.error(f"Error sending search results: {e}")
 
 async def handle_webhook_message(data: dict, client):
     """Handle webhook message updates"""
@@ -538,6 +559,27 @@ async def setup_bot_handlers(client):
     )
     
     logger.info("Bot handlers set up successfully")
+
+async def setup_backup_channel(client):
+    """Set up backup channel monitoring"""
+    try:
+        channel = await client.get_entity(BACKUP_CHANNEL_ID)
+        logger.info(f"Successfully connected to backup channel: {channel.title}")
+        
+        @client.on(events.NewMessage(chats=BACKUP_CHANNEL_ID))
+        async def backup_channel_handler(event):
+            try:
+                if event.message.document:
+                    # Process document
+                    await handle_backup_document(event.message)
+            except Exception as e:
+                logger.error(f"Error in backup channel handler: {e}")
+                
+        logger.info("Backup channel handler set up successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to set up backup channel: {e}")
+        return False
 
 # FastAPI endpoint
 @app.post(WEBHOOK_PATH)

@@ -67,9 +67,9 @@ async def handle_webhook(request: Request):
     try:
         # Get webhook secret from environment
         webhook_secret = os.getenv('WEBHOOK_SECRET', '')
-        if webhook_secret:
+        if (webhook_secret):
             secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
-            if secret != webhook_secret:
+            if (secret != webhook_secret):
                 raise HTTPException(status_code=403, detail="Invalid secret token")
 
         # Parse update data
@@ -78,9 +78,13 @@ async def handle_webhook(request: Request):
         
         # Handle different types of updates
         if 'message' in update_data:
+            logger.info(f"Handling message update: {update_data['message'].get('text', '')}")
             await telegram_bot.handle_webhook_message(update_data['message'], client)
+            return Response(status_code=200)
         elif 'callback_query' in update_data:
+            logger.info("Handling callback query update")
             await telegram_bot.handle_webhook_callback(update_data['callback_query'], client)
+            return Response(status_code=200)
 
         return Response(status_code=200)
     except Exception as e:
