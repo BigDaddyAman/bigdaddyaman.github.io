@@ -548,6 +548,7 @@ async def handle_webhook(request: Request):
         client = await get_client()
         
         if 'message' in data:
+            # Replace the direct message handler call with specific webhook message handler
             await handle_webhook_message(data['message'], client)
         elif 'callback_query' in data:
             await handle_webhook_callback(data['callback_query'], client)
