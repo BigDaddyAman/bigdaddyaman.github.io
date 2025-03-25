@@ -8,6 +8,7 @@ import asyncio
 from database import init_db
 from userdb import init_user_db
 from premium import init_premium_db
+import asyncpg
 
 # Load environment variables
 load_dotenv()
@@ -32,35 +33,83 @@ PORT = int(os.getenv('PORT', 8000))
 # Initialize bot
 bot = TelegramClient('bot', api_id, api_hash).start(bot_token=bot_token)
 
+async def wait_for_db():
+    """Wait for database to become available"""
+    retries = 5
+    while retries > 0:
+        try:
+            # Test database connection
+            conn = await asyncpg.connect(
+                database=os.getenv('PGDATABASE'),
+                user=os.getenv('PGUSER'),
+                password=os.getenv('PGPASSWORD'),
+                host=os.getenv('PGHOST'),
+                port=os.getenv('PGPORT')
+            )
+            await conn.close()
+            return True
+        except Exception as e:
+            logger.warning(f"Database not ready, retrying... ({e})")
+            retries -= 1
+            await asyncio.sleep(5)
+    return False
+
+async def check_bot_auth():
+    """Check if bot is properly authenticated"""
+    try:
+        if not bot.is_connected():
+            await bot.connect()
+        me = await bot.get_me()
+        return bool(me)
+    except Exception as e:
+        logger.error(f"Bot auth check failed: {e}")
+        return False
+
 @app.on_event("startup")
 async def startup_event():
-    """Initialize everything on startup"""
+    """Initialize everything on startup with proper checks"""
     try:
+        # Wait for database
+        logger.info("Waiting for database...")
+        if not await wait_for_db():
+            raise HTTPException(status_code=503, detail="Database unavailable")
+
         # Initialize databases
+        logger.info("Initializing databases...")
         await init_db()
         await init_user_db()
         await init_premium_db()
         
-        # Set webhook
+        # Connect and check bot
+        logger.info("Connecting bot...")
         await bot.connect()
-        if not await bot.is_user_authorized():
-            logger.error("Bot not authorized!")
-            raise HTTPException(status_code=500, detail="Bot not authorized")
+        if not await check_bot_auth():
+            raise HTTPException(status_code=503, detail="Bot authentication failed")
             
-        # Set webhook
-        webhook_info = await bot.get_webhook_info()
-        if webhook_info.url != WEBHOOK_URL:
-            success = await bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
-            if success:
-                logger.info(f"Webhook set to {WEBHOOK_URL}{WEBHOOK_PATH}")
-            else:
-                logger.error("Failed to set webhook")
-                raise HTTPException(status_code=500, detail="Failed to set webhook")
+        # Set webhook with retries
+        retries = 3
+        while retries > 0:
+            try:
+                webhook_info = await bot.get_webhook_info()
+                if webhook_info.url != WEBHOOK_URL:
+                    success = await bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+                    if success:
+                        logger.info(f"Webhook set to {WEBHOOK_URL}{WEBHOOK_PATH}")
+                        break
+                else:
+                    logger.info("Webhook already set correctly")
+                    break
+            except Exception as e:
+                logger.warning(f"Webhook setup attempt {4-retries} failed: {e}")
+                retries -= 1
+                if retries == 0:
+                    raise HTTPException(status_code=503, detail="Failed to set webhook")
+                await asyncio.sleep(5)
                 
         logger.info("Bot initialized successfully")
     except Exception as e:
         logger.error(f"Startup error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e))
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -73,14 +122,42 @@ async def shutdown_event():
 
 @app.get("/")
 async def health_check():
-    """Health check endpoint"""
+    """Comprehensive health check endpoint"""
+    health = {
+        "status": "healthy",
+        "checks": {
+            "database": False,
+            "bot": False,
+            "webhook": False
+        }
+    }
+    
     try:
-        if not bot.is_connected():
-            await bot.connect()
-        return {"status": "healthy", "bot_connected": True}
+        # Check database
+        if await wait_for_db():
+            health["checks"]["database"] = True
+        
+        # Check bot connection
+        if await check_bot_auth():
+            health["checks"]["bot"] = True
+            
+        # Check webhook
+        webhook_info = await bot.get_webhook_info()
+        if webhook_info.url == f"{WEBHOOK_URL}{WEBHOOK_PATH}":
+            health["checks"]["webhook"] = True
+            
+        # Overall health status
+        if all(health["checks"].values()):
+            health["status"] = "healthy"
+        else:
+            health["status"] = "degraded"
+            raise HTTPException(status_code=503, detail=health)
+            
+        return health
     except Exception as e:
         logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=503, detail="Bot not connected")
+        health["status"] = "unhealthy"
+        raise HTTPException(status_code=503, detail=health)
 
 @app.post(WEBHOOK_PATH)
 async def handle_webhook(request: Request):
