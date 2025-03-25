@@ -399,6 +399,101 @@ async def send_webhook_results(client, chat_id, text, video_results, page, total
     
     await client.send_message(chat_id, header, buttons=buttons)
 
+async def handle_webhook_callback(callback_data: dict, client):
+    """Handle webhook callback queries"""
+    try:
+        data = callback_data.get('data', '').decode('utf-8') if isinstance(callback_data.get('data'), bytes) else callback_data.get('data', '')
+        chat_id = callback_data.get('message', {}).get('chat', {}).get('id')
+        message_id = callback_data.get('message', {}).get('message_id')
+        
+        if data.startswith("page|"):
+            parts = data.split("|")
+            text = parts[1]
+            page = int(parts[2])
+            
+            page_size = 10
+            offset = (page - 1) * page_size
+            
+            keyword_list = split_keywords(text)
+            db_results = await search_files(keyword_list, page_size, offset)
+            total_results = await count_search_results(keyword_list)
+            total_pages = math.ceil(total_results / page_size)
+            
+            video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+            
+            if video_results:
+                header = f"{total_results} Results for '{text}'"
+                buttons = await create_results_buttons(video_results, text, page, total_pages)
+                await client.edit_message(
+                    chat_id, 
+                    message_id,
+                    header,
+                    buttons=buttons
+                )
+            else:
+                await client.answer_callback_query(
+                    callback_data['id'],
+                    "No more results",
+                    show_alert=True
+                )
+        elif data.startswith("current|"):
+            page = data.split('|')[1]
+            await client.answer_callback_query(
+                callback_data['id'],
+                f"Current page {page}",
+                show_alert=True
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in webhook callback handler: {e}")
+        await client.answer_callback_query(
+            callback_data['id'],
+            "Error processing request",
+            show_alert=True
+        )
+
+async def create_results_buttons(video_results, text, page, total_pages):
+    """Create buttons grid with page numbers"""
+    buttons = []
+    
+    # Create result buttons
+    for result in video_results:
+        id, caption, file_name, rank = result
+        token = await store_token(str(id))
+        if token:
+            display_name = format_button_text(file_name or caption or "Unknown File")
+            safe_video_name = urllib.parse.quote(file_name, safe='')
+            safe_token = urllib.parse.quote(token, safe='')
+            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+            buttons.append([Button.url(display_name, website_link)])
+    
+    # Add improved pagination
+    if total_pages > 1:
+        pagination = []
+        
+        # Always show first page
+        if page > 1:
+            pagination.append(Button.inline("1️⃣", f"page|{text}|1"))
+            
+        # Add previous button if not on first page
+        if page > 1:
+            pagination.append(Button.inline("⬅️", f"page|{text}|{page-1}"))
+        
+        # Add current page button
+        pagination.append(Button.inline(f"•{page}•", f"current|{page}"))
+        
+        # Add next button if not on last page
+        if page < total_pages:
+            pagination.append(Button.inline("➡️", f"page|{text}|{page+1}"))
+            
+        # Always show last page
+        if page < total_pages:
+            pagination.append(Button.inline(f"{total_pages}️⃣", f"page|{text}|{total_pages}"))
+            
+        buttons.append(pagination)
+    
+    return buttons
+
 # Bot setup functions
 async def setup_webhook():
     """Set up webhook for the bot"""
@@ -460,10 +555,11 @@ async def handle_webhook(request: Request):
         client = await get_client()
         
         if 'message' in data:
-            await handle_webhook_message(data['message'], client)
+            chat_type = data['message'].get('chat', {}).get('type')
+            if chat_type == 'private':
+                await handle_webhook_message(data['message'], client)
         elif 'callback_query' in data:
-            # Add callback query handling here if needed
-            pass
+            await handle_webhook_callback(data['callback_query'], client)
             
         return {"ok": True}
     except Exception as e:
