@@ -1036,25 +1036,83 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Use Telethon only for file operations when needed
+    # Handle file token if provided
     if len(context.args) > 0:
         token = context.args[0]
-        # ...existing file handling code...
+        result = await get_file_by_token(token)
+        
+        if result:
+            file_info = await get_file_by_id(result)
+            if file_info:
+                try:
+                    document = Document(
+                        id=int(file_info['id']),
+                        access_hash=int(file_info['access_hash']),
+                        file_reference=bytes(file_info['file_reference']),
+                        date=None,
+                        mime_type=file_info['mime_type'],
+                        size=None,
+                        dc_id=None,
+                        attributes=[DocumentAttributeFilename(file_name=file_info['file_name'])]
+                    )
+                    
+                    await client.send_file(
+                        update.effective_user.id,
+                        file=document,
+                        caption=f"{format_caption(file_info['caption'])}\n\n{BOT_USERNAME}"
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending file: {e}")
+                    await update.message.reply_text('Failed to send the file.')
+            else:
+                await update.message.reply_text('File not found in the database.')
+        else:
+            await update.message.reply_text('Invalid token.')
     else:
         await update.message.reply_text('Hantar movies apa yang anda mahu.')
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower().strip()
-    # ...existing search logic but use telegram-bot-api for buttons...
-    keyboard = []
-    for result in video_results:
-        # Convert Telethon buttons to telegram-bot-api buttons
-        keyboard.append([InlineKeyboardButton(
-            text=display_name,
-            url=website_link
-        )])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(header, reply_markup=reply_markup)
+    keyword_list = split_keywords(normalize_keyword(text))
+    
+    page = 1
+    page_size = 10
+    offset = (page - 1) * page_size
+
+    db_results = await search_files(keyword_list, page_size, offset)
+    total_results = await count_search_results(keyword_list)
+    total_pages = math.ceil(total_results / page_size)
+
+    video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+
+    if video_results:
+        header = f"{total_results} Results for '{text}'"
+        keyboard = []
+        
+        for result in video_results:
+            id, caption, file_name, rank = result
+            token = await store_token(str(id))
+            if token:
+                display_name = format_button_text(file_name or caption or "Unknown File")
+                safe_video_name = urllib.parse.quote(file_name, safe='')
+                safe_token = urllib.parse.quote(token, safe='')
+                website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                keyboard.append([InlineKeyboardButton(display_name, url=website_link)])
+        
+        # Add pagination buttons
+        if total_pages > 1:
+            pagination_row = []
+            if page > 1:
+                pagination_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"page|{text}|{page-1}"))
+            pagination_row.append(InlineKeyboardButton(f"📄 {page}/{total_pages}", callback_data="ignore"))
+            if page < total_pages:
+                pagination_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"page|{text}|{page+1}"))
+            keyboard.append(pagination_row)
+            
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(header, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text('Movies yang anda cari belum ada boleh request di @Request67_bot.')
 
 # Add this function to handle startup
 async def start():
