@@ -13,6 +13,8 @@ from userdb import init_user_db
 from premium import init_premium_db
 import asyncpg
 from contextlib import asynccontextmanager
+from datetime import datetime
+from fastapi.responses import JSONResponse
 
 # Load environment variables
 load_dotenv()
@@ -230,40 +232,53 @@ app = FastAPI(
 async def health_check():
     """Comprehensive health check endpoint"""
     health = {
-        "status": "healthy",
+        "status": "unhealthy",
         "checks": {
             "database": False,
             "bot": False,
             "webhook": False
-        }
+        },
+        "timestamp": datetime.utcnow().isoformat()
     }
     
     try:
-        # Check database
-        if await wait_for_db():
-            health["checks"]["database"] = True
+        # Check database with timeout
+        db_check = asyncio.create_task(wait_for_db())
+        try:
+            health["checks"]["database"] = await asyncio.wait_for(db_check, timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Database health check timed out")
         
-        # Check bot connection
-        if await check_bot_auth():
-            health["checks"]["bot"] = True
+        # Check bot connection with timeout
+        bot_check = asyncio.create_task(check_bot_auth())
+        try:
+            health["checks"]["bot"] = await asyncio.wait_for(bot_check, timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Bot health check timed out")
             
-        # Check webhook
-        current_webhook = await get_webhook_info()
-        if current_webhook == f"{WEBHOOK_URL}{WEBHOOK_PATH}":
-            health["checks"]["webhook"] = True
+        # Check webhook with timeout
+        webhook_check = asyncio.create_task(get_webhook_info())
+        try:
+            current_webhook = await asyncio.wait_for(webhook_check, timeout=5.0)
+            health["checks"]["webhook"] = (current_webhook == WEBHOOK_URL)
+        except asyncio.TimeoutError:
+            logger.warning("Webhook health check timed out")
             
-        # Overall health status
-        if all(health["checks"].values()):
+        # Determine overall health status
+        all_checks = health["checks"].values()
+        if all(all_checks):
             health["status"] = "healthy"
-        else:
+        elif any(all_checks):
             health["status"] = "degraded"
-            raise HTTPException(status_code=503, detail=health)
+        
+        # Return appropriate status code
+        status_code = 200 if health["status"] == "healthy" else 503
+        return JSONResponse(content=health, status_code=status_code)
             
-        return health
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        health["status"] = "unhealthy"
-        raise HTTPException(status_code=503, detail=health)
+        logger.error(f"Health check failed: {str(e)}")
+        health["error"] = str(e)
+        return JSONResponse(content=health, status_code=503)
 
 @app.post(WEBHOOK_PATH)
 async def handle_webhook(request: Request):
