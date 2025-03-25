@@ -29,7 +29,7 @@ from telethon.tl.types import (
 from telethon.tl.functions.channels import GetParticipantRequest
 from fastapi import FastAPI, Request
 import uvicorn
-from redis_cache import RedisCache
+from redis_cache import RedisCache, redis_cache  # Import the singleton instance
 import json
 
 # Load environment variables from .env file
@@ -267,6 +267,7 @@ async def main():
         await init_db()
         await init_user_db()
         await init_premium_db()
+        # No need to initialize Redis here as it's done in the module
         
         # Create FastAPI app
         app = FastAPI()

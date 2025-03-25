@@ -11,6 +11,7 @@ class RedisCache:
     def __init__(self):
         self.redis = None
         self.cache_ttl = 3600  # 1 hour cache
+        self.init()  # Initialize when instance is created
 
     def init(self):
         try:
@@ -25,10 +26,12 @@ class RedisCache:
             logger.info("Redis cache initialized")
         except Exception as e:
             logger.error(f"Redis initialization error: {e}")
-            raise
+            self.redis = None
 
     def set_search_results(self, query: str, results: list, page: int = 1):
         """Cache search results"""
+        if not self.redis:
+            return
         try:
             cache_key = f"search:{query}:page:{page}"
             self.redis.setex(
@@ -41,6 +44,8 @@ class RedisCache:
 
     def get_search_results(self, query: str, page: int = 1):
         """Get cached search results"""
+        if not self.redis:
+            return None
         try:
             cache_key = f"search:{query}:page:{page}"
             cached = self.redis.get(cache_key)
@@ -53,8 +58,12 @@ class RedisCache:
 
     def clear_cache(self):
         """Clear all cached data"""
+        if not self.redis:
+            return
         try:
             self.redis.flushdb()
             logger.info("Cache cleared")
         except Exception as e:
             logger.error(f"Redis cache clear error: {e}")
+
+redis_cache = RedisCache()  # Create a singleton instance
