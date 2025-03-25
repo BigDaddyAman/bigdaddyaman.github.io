@@ -29,9 +29,10 @@ api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
 
-# Webhook settings
+# Update Webhook settings
+WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
+WEBHOOK_PATH = os.getenv('WEBHOOK_PATH', f"/webhook/{bot_token}")
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-WEBHOOK_PATH = f"/webhook/{bot_token}"
 PORT = int(os.getenv('PORT', 8000))
 
 # Initialize bot globally with MemorySession
@@ -122,19 +123,37 @@ async def get_webhook_info():
                 return data.get('result', {}).get('url', '')
             return None
 
-async def set_webhook(url: str):
-    """Set webhook using Telegram Bot API"""
-    async with aiohttp.ClientSession() as session:
-        api_url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
-        params = {
-            'url': url,
-            'allowed_updates': ['message', 'callback_query']
-        }
-        async with session.post(api_url, json=params) as response:
-            if response.status == 200:
-                data = await response.json()
-                return data.get('ok', False)
-            return False
+async def setup_webhook():
+    """Set up webhook for the bot"""
+    try:
+        # Delete any existing webhook
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f'https://api.telegram.org/bot{bot_token}/deleteWebhook'
+            ) as resp:
+                await resp.json()  # Clear any existing webhook
+
+        # Set new webhook
+        async with aiohttp.ClientSession() as session:
+            webhook_data = {
+                'url': WEBHOOK_URL,
+                'max_connections': 100,
+                'allowed_updates': ['message', 'callback_query']
+            }
+            async with session.post(
+                f'https://api.telegram.org/bot{bot_token}/setWebhook',
+                json=webhook_data
+            ) as resp:
+                result = await resp.json()
+                if result.get('ok'):
+                    logger.info(f"Webhook set successfully to {WEBHOOK_URL}")
+                    return True
+                else:
+                    logger.error(f"Failed to set webhook: {result}")
+                    return False
+    except Exception as e:
+        logger.error(f"Error setting webhook: {e}")
+        return False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -172,31 +191,9 @@ async def lifespan(app: FastAPI):
         await init_user_db()
         await init_premium_db()
         
-        # Set webhook with retries
-        webhook_success = False
-        retries = 3
-        while retries > 0 and not webhook_success:
-            try:
-                current_webhook = await get_webhook_info()
-                webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
-                
-                if current_webhook != webhook_url:
-                    success = await set_webhook(webhook_url)
-                    if success:
-                        logger.info(f"Webhook set to: {webhook_url}")
-                        webhook_success = True
-                    else:
-                        raise Exception("Webhook setting returned False")
-                else:
-                    logger.info("Webhook already set correctly")
-                    webhook_success = True
-                break
-            except Exception as e:
-                retries -= 1
-                logger.error(f"Webhook setup attempt failed ({3-retries}/3): {e}")
-                if retries == 0:
-                    raise HTTPException(status_code=503, detail=f"Failed to set webhook: {str(e)}")
-                await asyncio.sleep(5)
+        # Set up webhook
+        if not await setup_webhook():
+            raise HTTPException(status_code=503, detail="Webhook setup failed")
                 
         yield
         
@@ -258,11 +255,21 @@ async def health_check():
 async def handle_webhook(request: Request):
     """Handle incoming webhook updates"""
     try:
-        data = await request.json()
-        update = types.Update.from_dict(data)
-        
-        # Process update
-        await bot.process_update(update)
+        # Verify secret token if set
+        if WEBHOOK_SECRET:
+            secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
+            if secret != WEBHOOK_SECRET:
+                raise HTTPException(status_code=403, detail="Invalid secret token")
+
+        update_data = await request.json()
+        update = types.Update.from_dict(update_data)
+
+        # Handle different types of updates
+        if update.message:
+            await handle_message(update.message)
+        elif update.callback_query:
+            await handle_callback_query(update.callback_query)
+
         return Response(status_code=200)
     except Exception as e:
         logger.error(f"Error handling webhook: {e}")
