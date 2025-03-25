@@ -31,18 +31,25 @@ WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 WEBHOOK_PATH = f"/webhook/{bot_token}"
 PORT = int(os.getenv('PORT', 8000))
 
-# Initialize bot
-bot = TelegramClient(
-    'bot_session', 
-    api_id, 
-    api_hash,
-    system_version="4.16.30-vxCUSTOM",
-    device_model="Railway Server"
-)
-
-# Add this line after bot initialization
-loop = asyncio.get_event_loop()
-loop.run_until_complete(bot.start(bot_token=bot_token))
+# Replace the direct bot initialization with an async function
+async def initialize_bot():
+    """Initialize and start the bot"""
+    global bot
+    bot = TelegramClient(
+        'bot_session', 
+        api_id, 
+        api_hash,
+        system_version="4.16.30-vxCUSTOM",
+        device_model="Railway Server"
+    )
+    
+    try:
+        await bot.start(bot_token=bot_token)
+        logger.info("Bot initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to initialize bot: {e}")
+        return False
 
 async def wait_for_db():
     """Wait for database to become available"""
@@ -203,17 +210,29 @@ async def handle_webhook(request: Request):
         logger.error(f"Error handling webhook: {e}")
         return Response(status_code=500)
 
+# Modify the main part
 if __name__ == "__main__":
     try:
+        # Use asyncio to run the initialization
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Initialize bot
+        if not loop.run_until_complete(initialize_bot()):
+            raise RuntimeError("Bot initialization failed")
+            
+        # Start uvicorn
         uvicorn.run(
             "webhook_server:app",
             host="0.0.0.0",
             port=PORT,
             workers=1,
-            loop="asyncio",  # Changed from uvloop to asyncio for better compatibility
+            loop="asyncio",
             log_level="info",
             reload=False
         )
     except Exception as e:
         logger.error(f"Server startup error: {e}")
         raise
+    finally:
+        loop.close()
