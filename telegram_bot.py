@@ -1,4 +1,5 @@
 import logging
+from fastapi import FastAPI, Request
 from telethon import TelegramClient, events, Button, errors
 from telethon.tl.types import Document, DocumentAttributeFilename, InputPeerUser
 from telethon.errors.rpcerrorlist import UserIsBlockedError, FloodWaitError, UserDeactivatedError
@@ -27,9 +28,9 @@ from telethon.tl.types import (
 )
 
 from telethon.tl.functions.channels import GetParticipantRequest
-from fastapi import FastAPI, Request
-import uvicorn
 import json
+import aiohttp
+from fastapi.middleware.cors import CORSMiddleware
 
 # Load environment variables from .env file
 load_dotenv()
@@ -46,6 +47,18 @@ logger = logging.getLogger(__name__)
 api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
+
+# Configure FastAPI
+app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 client = TelegramClient(
     MemorySession(),  # Use StringSession() if you want to save the session
@@ -66,12 +79,6 @@ CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"  # Add invite link
 
 # Add bot username constant near the top with other constants
 BOT_USERNAME = "@Kakifilemv1Bot"
-
-# Add these near the top after loading env vars
-WEBHOOK_PATH = os.getenv('WEBHOOK_PATH')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL') 
-WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
-PORT = int(os.getenv('PORT', 8080))
 
 # Add this function near the top with other utility functions
 def format_filename(filename: str) -> str:
@@ -246,46 +253,150 @@ async def init_bot():
         logger.error(f"Bot initialization error: {e}")
         raise
 
-async def main():
+@app.on_event("startup")
+async def on_startup():
     try:
-        # Initialize bot and databases
-        await init_bot()
+        # Initialize databases
         await init_db()
         await init_user_db()
         await init_premium_db()
         
-        # Create FastAPI app
-        app = FastAPI()
+        # Start client
+        await client.start()
         
-        @app.post(WEBHOOK_PATH)
-        async def handle_webhook(request: Request):
-            try:
-                data = await request.json()
-                # Parse the update and process it
-                await client._handle_update(data)
-                return {"status": "ok"}
-            except Exception as e:
-                logger.error(f"Webhook error: {e}")
-                return {"status": "error", "message": str(e)}
-
-        @app.get("/")
-        async def health_check():
-            return {"status": "ok", "message": "Bot is running"}
-
-        # Start FastAPI server
-        config = uvicorn.Config(
-            app=app,
-            host="0.0.0.0",
-            port=PORT,
-            log_level="info"
-        )
-        server = uvicorn.Server(config)
-        await server.serve()
-        
+        # Setup webhook
+        if not await setup_webhook():
+            logger.error("Failed to setup webhook")
+            
+        logger.info("Bot started successfully")
     except Exception as e:
-        logger.error(f"Critical error in main: {str(e)}", exc_info=True)
+        logger.error(f"Startup error: {e}")
         raise
 
+@app.on_event("shutdown")
+async def on_shutdown():
+    await client.disconnect()
+
+@app.post(os.getenv('WEBHOOK_PATH'))
+async def telegram_webhook(request: Request):
+    try:
+        update = await request.json()
+        
+        # Handle the update
+        if 'message' in update:
+            message = update['message']
+            chat_id = message['chat']['id']
+            user_id = message['from']['id']
+            
+            # Check if user is in channel
+            if not await is_user_in_channel(client, user_id):
+                keyboard = {
+                    'inline_keyboard': [[{
+                        'text': 'Join Channel',
+                        'url': CHANNEL_INVITE_LINK
+                    }]]
+                }
+                await send_telegram_message(chat_id, 
+                    "⚠️ You must join our channel first to use this bot!\n\n"
+                    "1. Click the button below to join\n"
+                    "2. After joining, come back and try again",
+                    keyboard
+                )
+                return {'ok': True}
+                
+            # Update user activity
+            await update_user_activity(user_id)
+            
+            # Handle commands
+            if 'text' in message:
+                text = message['text']
+                
+                if text.startswith('/start'):
+                    # Handle /start command
+                    await handle_start_command(message)
+                    
+                elif text.startswith('/stats'):
+                    # Handle /stats command 
+                    await handle_stats_command(message)
+                    
+                elif text.startswith('/broadcast'):
+                    # Handle /broadcast command
+                    await handle_broadcast_command(message)
+                    
+                else:
+                    # Handle search query
+                    await handle_search_query(message)
+                    
+            elif 'document' in message:
+                # Handle document upload
+                await handle_document_upload(message)
+                
+        elif 'callback_query' in update:
+            # Handle callback queries
+            await handle_callback_query(update['callback_query'])
+            
+        return {'ok': True}
+        
+    except Exception as e:
+        logger.error(f"Error handling webhook update: {e}")
+        return {'ok': False, 'error': str(e)}
+
+# Add helper function to send messages via HTTP API
+async def send_telegram_message(chat_id: int, text: str, reply_markup: dict = None):
+    url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'HTML'
+    }
+    if reply_markup:
+        payload['reply_markup'] = json.dumps(reply_markup)
+        
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            return await resp.json()
+
+# Add handlers for different message types
+async def handle_start_command(message):
+    # Implementation of /start command handler
+    # ...existing start command logic...
+    pass
+
+async def handle_stats_command(message):
+    # Implementation of /stats command handler  
+    # ...existing stats command logic...
+    pass
+
+async def handle_broadcast_command(message):
+    # Implementation of /broadcast command handler
+    # ...existing broadcast command logic... 
+    pass
+
+async def handle_search_query(message):
+    # Implementation of search query handler
+    # ...existing search logic...
+    pass
+
+async def handle_document_upload(message):
+    # Implementation of document upload handler
+    # ...existing document handling logic...
+    pass
+
+async def handle_callback_query(callback_query):
+    # Implementation of callback query handler
+    # ...existing callback query logic...
+    pass
+
+async def main():
+    try:
+        # Initialize bot first
+        await init_bot()
+        
+        # Then initialize databases
+        await init_db()
+        await init_user_db()
+        await init_premium_db()
+        
         # Start bot
         await client.start()
         logger.info("Main bot created")
