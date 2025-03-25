@@ -53,7 +53,35 @@ api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
 
 # Configure FastAPI
-app = FastAPI()
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    try:
+        # Initialize databases
+        await init_db()
+        await init_user_db()
+        await init_premium_db()
+        
+        # Start client
+        await client.start()
+        
+        # Setup webhook
+        if not await setup_webhook():
+            logger.error("Failed to setup webhook")
+            
+        logger.info("Bot started successfully")
+        yield
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
+        raise
+    finally:
+        # Shutdown
+        await client.disconnect()
+
+# Update FastAPI app initialization with lifespan
+app = FastAPI(lifespan=lifespan)
 
 # Add CORS middleware
 app.add_middleware(
@@ -258,30 +286,6 @@ async def init_bot():
     except Exception as e:
         logger.error(f"Bot initialization error: {e}")
         raise
-
-@app.on_event("startup")
-async def on_startup():
-    try:
-        # Initialize databases
-        await init_db()
-        await init_user_db()
-        await init_premium_db()
-        
-        # Start client
-        await client.start()
-        
-        # Setup webhook
-        if not await setup_webhook():
-            logger.error("Failed to setup webhook")
-            
-        logger.info("Bot started successfully")
-    except Exception as e:
-        logger.error(f"Startup error: {e}")
-        raise
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    await client.disconnect()
 
 @app.post(os.getenv('WEBHOOK_PATH'))
 async def telegram_webhook(request: Request):
@@ -1066,9 +1070,16 @@ if __name__ == "__main__":
             os.remove(session_file)
             logger.info(f"Deleted session file: {session_file}")
 
-        asyncio.run(start())
+        # Create and set event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Run the start function
+        loop.run_until_complete(start())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}", exc_info=True)
         raise
+    finally:
+        loop.close()
