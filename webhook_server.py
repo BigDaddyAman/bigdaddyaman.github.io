@@ -69,44 +69,67 @@ async def check_bot_auth():
 async def startup_event():
     """Initialize everything on startup with proper checks"""
     try:
-        # Wait for database
-        logger.info("Waiting for database...")
+        # Print environment variables (without sensitive data)
+        logger.info(f"Starting bot with webhook URL: {WEBHOOK_URL}")
+        logger.info(f"Port: {PORT}")
+        logger.info(f"API ID present: {'Yes' if api_id else 'No'}")
+        logger.info(f"API Hash present: {'Yes' if api_hash else 'No'}")
+        logger.info(f"Bot Token present: {'Yes' if bot_token else 'No'}")
+
+        # Check database connection first
+        logger.info("Checking database connection...")
         if not await wait_for_db():
+            logger.error("Database connection failed!")
             raise HTTPException(status_code=503, detail="Database unavailable")
 
-        # Initialize databases
+        # Initialize bot connection first
+        logger.info("Initializing bot connection...")
+        try:
+            await bot.connect()
+            me = await bot.get_me()
+            if not me:
+                raise Exception("Bot authentication failed")
+            logger.info(f"Bot connected successfully as @{me.username}")
+        except Exception as e:
+            logger.error(f"Bot connection failed: {e}")
+            raise HTTPException(status_code=503, detail=f"Bot connection failed: {str(e)}")
+
+        # Now initialize databases
         logger.info("Initializing databases...")
         await init_db()
         await init_user_db()
         await init_premium_db()
         
-        # Connect and check bot
-        logger.info("Connecting bot...")
-        await bot.connect()
-        if not await check_bot_auth():
-            raise HTTPException(status_code=503, detail="Bot authentication failed")
-            
-        # Set webhook with retries
+        # Set webhook with better error handling
+        logger.info("Setting up webhook...")
+        webhook_success = False
         retries = 3
-        while retries > 0:
+        while retries > 0 and not webhook_success:
             try:
                 webhook_info = await bot.get_webhook_info()
-                if webhook_info.url != WEBHOOK_URL:
-                    success = await bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
+                current_url = webhook_info.url if webhook_info else None
+                logger.info(f"Current webhook URL: {current_url}")
+                
+                if current_url != f"{WEBHOOK_URL}{WEBHOOK_PATH}":
+                    full_webhook_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
+                    success = await bot.set_webhook(url=full_webhook_url)
                     if success:
-                        logger.info(f"Webhook set to {WEBHOOK_URL}{WEBHOOK_PATH}")
-                        break
+                        logger.info(f"Webhook set to: {full_webhook_url}")
+                        webhook_success = True
+                    else:
+                        raise Exception("Webhook setting returned False")
                 else:
                     logger.info("Webhook already set correctly")
-                    break
+                    webhook_success = True
+                break
             except Exception as e:
-                logger.warning(f"Webhook setup attempt {4-retries} failed: {e}")
                 retries -= 1
+                logger.error(f"Webhook setup attempt failed ({3-retries}/3): {e}")
                 if retries == 0:
-                    raise HTTPException(status_code=503, detail="Failed to set webhook")
+                    raise HTTPException(status_code=503, detail=f"Failed to set webhook: {str(e)}")
                 await asyncio.sleep(5)
-                
-        logger.info("Bot initialized successfully")
+
+        logger.info("Bot initialization completed successfully!")
     except Exception as e:
         logger.error(f"Startup error: {e}")
         raise HTTPException(status_code=503, detail=str(e))
@@ -174,11 +197,16 @@ async def handle_webhook(request: Request):
         return Response(status_code=500)
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "webhook_server:app",
-        host="0.0.0.0",
-        port=PORT,
-        workers=1,  # Single worker for Telethon
-        loop="uvloop",
-        reload=False
-    )
+    try:
+        uvicorn.run(
+            "webhook_server:app",
+            host="0.0.0.0",
+            port=PORT,
+            workers=1,
+            loop="asyncio",  # Changed from uvloop to asyncio for better compatibility
+            log_level="info",
+            reload=False
+        )
+    except Exception as e:
+        logger.error(f"Server startup error: {e}")
+        raise
