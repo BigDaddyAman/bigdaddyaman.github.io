@@ -36,6 +36,7 @@ WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
 WEBHOOK_PATH = os.getenv('WEBHOOK_PATH')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 PORT = int(os.getenv('PORT', 8080))  # Change default port to 8080
+WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', '')  # Add this line near other env vars
 
 # Initialize bot globally with MemorySession
 bot = TelegramClient(
@@ -284,10 +285,11 @@ async def health_check():
 async def handle_webhook(request: Request):
     """Handle incoming webhook updates"""
     try:
-        # Verify secret token if set
+        # Only check secret if it's configured
         if WEBHOOK_SECRET:
             secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
             if secret != WEBHOOK_SECRET:
+                logger.warning("Invalid webhook secret received")
                 raise HTTPException(status_code=403, detail="Invalid secret token")
 
         update_data = await request.json()
@@ -300,6 +302,8 @@ async def handle_webhook(request: Request):
             await handle_callback_query(update.callback_query)
 
         return Response(status_code=200)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error handling webhook: {e}")
         return Response(status_code=500)
