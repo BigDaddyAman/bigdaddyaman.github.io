@@ -32,6 +32,10 @@ import json
 import aiohttp
 from fastapi.middleware.cors import CORSMiddleware
 
+# Add these imports at the top
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -67,6 +71,8 @@ client = TelegramClient(
     connection_retries=None,
     auto_reconnect=True
 ).start(bot_token=bot_token)
+
+application = Application.builder().token(bot_token).build()
 
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
 
@@ -282,79 +288,34 @@ async def telegram_webhook(request: Request):
     try:
         update = await request.json()
         
-        # Handle the update
+        # Single entry point for all updates
         if 'message' in update:
-            message = update['message']
-            chat_id = message['chat']['id']
-            user_id = message['from']['id']
-            
-            # Check if user is in channel
-            if not await is_user_in_channel(client, user_id):
-                keyboard = {
-                    'inline_keyboard': [[{
-                        'text': 'Join Channel',
-                        'url': CHANNEL_INVITE_LINK
-                    }]]
-                }
-                await send_telegram_message(chat_id, 
-                    "⚠️ You must join our channel first to use this bot!\n\n"
-                    "1. Click the button below to join\n"
-                    "2. After joining, come back and try again",
-                    keyboard
-                )
-                return {'ok': True}
-                
-            # Update user activity
-            await update_user_activity(user_id)
-            
-            # Handle commands
-            if 'text' in message:
-                text = message['text']
-                
-                if text.startswith('/start'):
-                    # Handle /start command
-                    await handle_start_command(message)
-                    
-                elif text.startswith('/stats'):
-                    # Handle /stats command 
-                    await handle_stats_command(message)
-                    
-                elif text.startswith('/broadcast'):
-                    # Handle /broadcast command
-                    await handle_broadcast_command(message)
-                    
-                else:
-                    # Handle search query
-                    await handle_search_query(message)
-                    
-            elif 'document' in message:
-                # Handle document upload
-                await handle_document_upload(message)
-                
+            await handle_message(update['message'])
         elif 'callback_query' in update:
-            # Handle callback queries
-            await handle_callback_query(update['callback_query'])
+            await handle_callback(update['callback_query'])
             
         return {'ok': True}
-        
     except Exception as e:
-        logger.error(f"Error handling webhook update: {e}")
-        return {'ok': False, 'error': str(e)}
+        logger.error(f"Webhook error: {e}")
+        return {'ok': False}
 
-# Add helper function to send messages via HTTP API
-async def send_telegram_message(chat_id: int, text: str, reply_markup: dict = None):
-    url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
+# Use Telegram Bot API instead of Telethon for sending messages
+async def send_message(chat_id, text, reply_markup=None):
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
-        'chat_id': chat_id,
-        'text': text,
-        'parse_mode': 'HTML'
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML"
     }
     if reply_markup:
-        payload['reply_markup'] = json.dumps(reply_markup)
+        payload["reply_markup"] = reply_markup
         
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as resp:
             return await resp.json()
+
+# Keep Telethon only for file operations
+# Use regular Bot API for everything else
 
 # Add handlers for different message types
 async def handle_start_command(message):
@@ -1042,6 +1003,61 @@ async def main():
         logger.error(f"Critical error in main: {str(e)}", exc_info=True)
         raise
 
+# Add telegram-bot-api handlers
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Use telegram-bot-api for basic message
+    if not await is_user_in_channel(client, update.effective_user.id):
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Join Channel", url=CHANNEL_INVITE_LINK)]
+        ])
+        await update.message.reply_text(
+            "⚠️ Welcome! You must join our channel first!\n\n"
+            "1. Click the button below to join\n"
+            "2. After joining, come back and try again",
+            reply_markup=keyboard
+        )
+        return
+
+    # Use Telethon only for file operations when needed
+    if len(context.args) > 0:
+        token = context.args[0]
+        # ...existing file handling code...
+    else:
+        await update.message.reply_text('Hantar movies apa yang anda mahu.')
+
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower().strip()
+    # ...existing search logic but use telegram-bot-api for buttons...
+    keyboard = []
+    for result in video_results:
+        # Convert Telethon buttons to telegram-bot-api buttons
+        keyboard.append([InlineKeyboardButton(
+            text=display_name,
+            url=website_link
+        )])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(header, reply_markup=reply_markup)
+
+# Add this function to handle startup
+async def start():
+    # Initialize databases
+    await init_db()
+    await init_user_db()
+    await init_premium_db()
+    
+    # Add handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_command))
+    
+    # Start both clients
+    await client.start()
+    await application.initialize()
+    await application.start()
+    
+    # Run both clients
+    async with application:
+        await application.run_polling()
+
 if __name__ == "__main__":
     try:
         # Delete the session file if it exists
@@ -1050,8 +1066,7 @@ if __name__ == "__main__":
             os.remove(session_file)
             logger.info(f"Deleted session file: {session_file}")
 
-        with client:
-            client.loop.run_until_complete(main())
+        asyncio.run(start())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:

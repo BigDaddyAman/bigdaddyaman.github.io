@@ -1,8 +1,7 @@
 asyncio
 telethon
+python-telegram-bot>=20.0
 psycopg2
 python-dotenv
 asyncpg
 aiohttp
-fastapi
-uvicorn
