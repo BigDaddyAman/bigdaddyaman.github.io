@@ -195,18 +195,6 @@ async def is_user_in_channel(client, user_id):
         # If we can't verify, assume not in channel for safety
         return False
 
-# Add error handler for the client
-@client.on(events.NewMessage)
-async def error_handler(event):
-    try:
-        # Your existing event handling code here
-        # ...
-        raise events.StopPropagation
-    except events.StopPropagation:
-        pass  # Stop propagation is expected, do nothing
-    except Exception as e:
-        logger.error(f"Uncaught error: {str(e)}", exc_info=True)
-
 # Initialize FastAPI
 app = FastAPI()
 
