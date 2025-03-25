@@ -88,7 +88,7 @@ def is_duplicate_message(chat_id: int, text: str) -> bool:
 async def get_client():
     """Get the current client instance"""
     global _client
-    if not __client:
+    if not _client:
         _client = await initialize_client()
     return _client
 
@@ -373,36 +373,33 @@ async def send_search_results(event, text, video_results, page, total_pages, tot
         # Add improved pagination with numbers and First/Last buttons
         if total_pages > 1:
             nav = []
+            nav_bottom = []
             
-            # First page button
+            # First page and Previous buttons
             if page > 1:
-                nav.append(Button.inline("« First", f"page|{text}|1"))
-
-            # Previous page button
-            if page > 1:
+                nav.append(Button.inline("«", f"page|{text}|1"))
                 nav.append(Button.inline("‹", f"page|{text}|{page-1}"))
 
-            # Calculate page range for numbered buttons
-            visible_pages = 5
-            start_page = max(1, min(page - (visible_pages // 2), total_pages - visible_pages + 1))
-            end_page = min(start_page + visible_pages - 1, total_pages)
-
-            # Add numbered page buttons
-            for p in range(start_page, end_page + 1):
+            # Numbered buttons
+            for p in range(max(1, page-2), min(total_pages+1, page+3)):
                 if p == page:
                     nav.append(Button.inline(f"[{p}]", f"current|{p}"))
                 else:
                     nav.append(Button.inline(str(p), f"page|{text}|{p}"))
 
-            # Next page button
+            # Next and Last buttons
             if page < total_pages:
                 nav.append(Button.inline("›", f"page|{text}|{page+1}"))
+                nav.append(Button.inline("»", f"page|{text}|{total_pages}"))
 
-            # Last page button
-            if page < total_pages:
-                nav.append(Button.inline("Last »", f"page|{text}|{total_pages}"))
+            # Bottom nav with First/Last Page text buttons
+            nav_bottom = [
+                Button.inline("First Page", f"page|{text}|1"),
+                Button.inline("Last Page", f"page|{text}|{total_pages}")
+            ]
 
             buttons.append(nav)
+            buttons.append(nav_bottom)
 
         # Send or edit message with retries
         max_retries = 3

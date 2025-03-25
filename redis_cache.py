@@ -94,5 +94,100 @@ class RedisCache:
             logger.error(f"Redis delete error: {e}")
             return False
 
+    async def check_cache(self, keyword: str) -> dict:
+        """Check cache status for a keyword"""
+        try:
+            if not self.redis:
+                return {"status": "disconnected"}
+                
+            pattern = f"*{keyword}*"
+            all_keys = self.redis.keys(pattern)
+            cache_data = {}
+            
+            for key in all_keys:
+                value = self.redis.get(key)
+                ttl = self.redis.ttl(key)
+                cache_data[key] = {
+                    "value": value,
+                    "ttl": ttl
+                }
+                
+            return {
+                "status": "connected",
+                "total_keys": len(all_keys),
+                "data": cache_data
+            }
+            
+        except Exception as e:
+            logger.error(f"Redis check cache error: {e}")
+            return {"status": "error", "message": str(e)}
+
+    async def debug_info(self) -> dict:
+        """Get Redis debug information"""
+        try:
+            if not self.redis:
+                return {"status": "disconnected"}
+                
+            info = self.redis.info()
+            return {
+                "status": "connected",
+                "used_memory": info.get("used_memory_human"),
+                "connected_clients": info.get("connected_clients"),
+                "total_keys": len(self.redis.keys("*")),
+                "uptime_days": info.get("uptime_in_days")
+            }
+            
+        except Exception as e:
+            logger.error(f"Redis debug info error: {e}")
+            return {"status": "error", "message": str(e)}
+
 # Create singleton instance
 redis_cache = RedisCache()
+
+# Add command to check Redis cache
+async def check_redis_command(event, client):
+    """Handle /redischeck command"""
+    if event.sender_id not in AUTHORIZED_USER_IDS:
+        await event.reply("You are not authorized to use this command.")
+        return
+
+    try:
+        # Get debug info
+        debug_info = await redis_cache.debug_info()
+        
+        # Get cache info for current search if available
+        cache_info = None
+        if event.message.text:
+            parts = event.message.text.split(maxsplit=1)
+            if len(parts) > 1:
+                keyword = parts[1]
+                cache_info = await redis_cache.check_cache(keyword)
+
+        # Format response
+        response = "📊 Redis Cache Status:\n\n"
+        response += f"Status: {debug_info['status']}\n"
+        if debug_info['status'] == 'connected':
+            response += f"Memory Used: {debug_info['used_memory']}\n"
+            response += f"Connected Clients: {debug_info['connected_clients']}\n"
+            response += f"Total Keys: {debug_info['total_keys']}\n"
+            response += f"Uptime (days): {debug_info['uptime_days']}\n"
+            
+        if cache_info:
+            response += f"\n🔍 Cache for '{keyword}':\n"
+            response += f"Found Keys: {cache_info['total_keys']}\n"
+            if cache_info['total_keys'] > 0:
+                for key, data in cache_info['data'].items():
+                    response += f"\nKey: {key}\n"
+                    response += f"TTL: {data['ttl']}s\n"
+
+        await event.reply(response)
+        
+    except Exception as e:
+        logger.error(f"Redis check command error: {e}")
+        await event.reply("Error checking Redis cache status.")
+
+# Add this to your setup_bot_handlers function
+    client.add_event_handler(
+        lambda e: check_redis_command(e, client),
+        events.NewMessage(pattern='/redischeck')
+    )
