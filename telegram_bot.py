@@ -334,17 +334,16 @@ async def handle_callback_query(event, client):
 async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
     """Helper function to send or edit search results with improved pagination"""
     try:
-        # Enhanced duplicate prevention
+        # Use Redis for deduplication
         cache_key = f"results:{event.chat_id}:{text}:{page}"
-        current_time = time.time()
-        
-        # Check if message was sent in last 5 seconds
-        if not is_edit and cache_key in _message_cache:
-            last_time = _message_cache[cache_key]
-            if current_time - last_time < 5:
+        if not is_edit:
+            # Check if we sent this result recently
+            last_sent = await redis_cache.get(cache_key)
+            if last_sent:
                 return
-                
-        _message_cache[cache_key] = current_time
+            
+            # Set a short TTL to prevent duplicates
+            await redis_cache.set(cache_key, time.time(), 5)  # 5 second cooldown
 
         # Prepare buttons in batches for better performance
         header = f"🎬 {total_results} Results for '{text}'"
@@ -439,12 +438,14 @@ async def process_page_change(event, text, page):
     except Exception as e:
         logger.error(f"Error processing page change: {e}")
 
+# Update the message handler to use a more robust cache system
 async def handle_webhook_message(data: dict, client):
     """Handle webhook message updates"""
     try:
         chat = data.get('chat', {})
         chat_id = chat.get('id')
         chat_type = chat.get('type')
+        message_id = data.get('message_id')
         
         if not chat_id or chat_type != 'private':
             return
@@ -453,12 +454,14 @@ async def handle_webhook_message(data: dict, client):
         if not text or text.startswith('/'):
             return
 
-        # Check for duplicate message
-        if is_duplicate_message(chat_id, text):
-            logger.info(f"Skipping duplicate webhook message: {text}")
+        # More robust duplicate check using message_id and chat_id
+        cache_key = f"msg:{chat_id}:{message_id}:{text}"
+        if await redis_cache.get(cache_key):
+            logger.info(f"Skipping duplicate message: {text}")
             return
+        await redis_cache.set(cache_key, True, 30)  # Cache for 30 seconds
 
-        # Process message normally
+        # Rest of your existing handle_webhook_message code...
         if not await is_user_in_channel(client, chat_id):
             keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
             await client.send_message(

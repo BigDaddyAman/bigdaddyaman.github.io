@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import FastAPI, Request, Response, HTTPException, BackgroundTasks
 from contextlib import asynccontextmanager
 import telegram_bot
 from telethon import events, types
@@ -10,6 +10,8 @@ import uvicorn
 from database import init_db
 from userdb import init_user_db
 from premium import init_premium_db
+from redis_cache import redis_cache
+import time
 
 # Load environment variables
 load_dotenv()
@@ -18,10 +20,36 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+async def cleanup_old_cache():
+    """Cleanup task to remove old cache entries"""
+    while True:
+        try:
+            # Get all message cache keys
+            pattern = "msg:*"
+            keys = await redis_cache.keys(pattern)
+            current_time = time.time()
+            
+            for key in keys:
+                try:
+                    value = await redis_cache.get(key)
+                    if value and (current_time - float(value)) > 30:
+                        await redis_cache.delete(key)
+                except:
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Cache cleanup error: {e}")
+            
+        await asyncio.sleep(30)  # Run every 30 seconds
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for FastAPI application"""
     try:
+        # Initialize Redis first
+        if not redis_cache.redis:
+            logger.error("Failed to initialize Redis")
+            
         # Initialize the bot client
         client = await telegram_bot.initialize_client()
         if not client:
@@ -37,6 +65,9 @@ async def lifespan(app: FastAPI):
         
         # Set up webhook
         await telegram_bot.setup_webhook()
+        
+        # Start cache cleanup task
+        asyncio.create_task(cleanup_old_cache())
         
         logger.info("Startup complete")
         yield
@@ -67,9 +98,9 @@ async def handle_webhook(request: Request):
     try:
         # Get webhook secret from environment
         webhook_secret = os.getenv('WEBHOOK_SECRET', '')
-        if (webhook_secret):
+        if webhook_secret:
             secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
-            if (secret != webhook_secret):
+            if secret != webhook_secret:
                 raise HTTPException(status_code=403, detail="Invalid secret token")
 
         # Parse update data
