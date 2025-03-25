@@ -1,18 +1,11 @@
 import logging
 from telethon import TelegramClient, events, Button, errors
-from telethon.tl.types import Document, DocumentAttributeFilename, InputPeerUser, InputPeerChannel, ChannelParticipantsSearch
+from telethon.tl.types import Document, DocumentAttributeFilename, InputPeerUser
 from telethon.errors.rpcerrorlist import UserIsBlockedError, FloodWaitError, UserDeactivatedError
-from telethon.sessions import MemorySession
-from telethon.tl.functions.channels import GetParticipantRequest
-from telethon.tl.functions.bots import SetBotCommandsRequest
-from telethon.tl.types import BotCommand
-from fastapi import FastAPI, Request
-import aiohttp
 import uuid
 import re
 import math
-import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta  # Add timedelta import here
 import base64
 from dotenv import load_dotenv
 import os
@@ -27,105 +20,80 @@ from userdb import (
     get_user_count, update_user_activity, get_active_users_count
 )
 from premium import init_premium_db, is_premium, add_or_renew_premium, get_premium_status
-from functools import lru_cache
-from typing import Dict, Set
-import time
-from telethon.tl.functions.messages import SetBotCallbackAnswerRequest
-from redis_cache import redis_cache  # Add this line
+from telethon.sessions import MemorySession  # Add this import
+from telethon.tl.types import (
+    InputPeerChannel,
+    ChannelParticipantsSearch
+)
 
-# Load environment variables and configure logging
+from telethon.tl.functions.channels import GetParticipantRequest
+from aiohttp import web
+from redis_cache import RedisCache
+import json
+
+# Load environment variables from .env file
 load_dotenv()
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,  # Change to INFO to reduce verbosity
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
-# Initialize settings and client
-_client = None
-app = FastAPI()
-
-# Bot settings
+# Your API ID, hash, and bot token
 api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
-WEBHOOK_PATH = f"/webhook/{bot_token}"
-WEBHOOK_HOST = os.getenv('WEBHOOK_HOST', 'https://worker-production-0a82.up.railway.app')
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-PORT = int(os.getenv('PORT', 8000))
 
-# Constants
+client = TelegramClient(
+    MemorySession(),  # Use StringSession() if you want to save the session
+    api_id,
+    api_hash,
+    connection_retries=None,
+    auto_reconnect=True
+).start(bot_token=bot_token)
+
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
-AUTHORIZED_USER_IDS = [7951420571, 1509468839]
-REQUIRED_CHANNEL = -1001457047091
-CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"
+
+# List of authorized user IDs
+AUTHORIZED_USER_IDS = [7951420571, 1509468839]  # Replace with your user ID and future moderator IDs
+
+# Add this constant near the top with other constants
+REQUIRED_CHANNEL = -1001457047091  # Use channel ID instead of username
+CHANNEL_INVITE_LINK = "https://t.me/+EdVjRJbcJUBmYWJl"  # Add invite link
+
+# Add bot username constant near the top with other constants
 BOT_USERNAME = "@Kakifilemv1Bot"
-BACKUP_CHANNEL_ID = -1002647276011  # Your backup channel ID
-RESULTS_PER_PAGE = 10
 
-# Cache for preventing duplicate messages
-_message_cache: Dict[int, Set[str]] = {}
-_cache_cleanup_time = 0
+# Add these near the top after loading env vars
+WEBHOOK_PATH = os.getenv('WEBHOOK_PATH')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL') 
+WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
+PORT = int(os.getenv('PORT', 8080))
 
-def is_duplicate_message(chat_id: int, text: str) -> bool:
-    """Check if a message is a duplicate within 5 seconds"""
-    global _message_cache, _cache_cleanup_time
-    current_time = time.time()
-    
-    # Cleanup old cache entries every 30 seconds
-    if current_time - _cache_cleanup_time > 30:
-        _message_cache.clear()
-        _cache_cleanup_time = current_time
-    
-    cache_key = f"{chat_id}:{text}"
-    if chat_id not in _message_cache:
-        _message_cache[chat_id] = {cache_key}
-        return False
-        
-    if cache_key in _message_cache[chat_id]:
-        return True
-        
-    _message_cache[chat_id].add(cache_key)
-    return False
+# Initialize Redis cache
+redis_cache = RedisCache()
 
-# Client management functions
-async def get_client():
-    """Get the current client instance"""
-    global _client
-    if not _client:
-        _client = await initialize_client()
-    return _client
-
-async def initialize_client():
-    """Initialize and return the Telegram client"""
-    global _client
-    if not _client:
-        _client = TelegramClient(
-            MemorySession(),
-            api_id,
-            api_hash,
-            system_version="4.16.30-vxCUSTOM",
-            device_model="Railway Server"
-        )
-        await _client.connect()
-        await _client.start(bot_token=bot_token)
-    return _client
-
-# Utility functions
+# Add this function near the top with other utility functions
 def format_filename(filename: str) -> str:
     """Format filename consistently when storing or displaying"""
     if not filename:
         return filename
-
+        
     # First extract any years from the filename
     years = re.findall(r'[\[\(\{]?((?:19|20)\d{2})[\]\}\)]?', filename)
     
     # Create clean version without any brackets
     clean = re.sub(r'[\[\(\{].*?[\]\}\)]', '.', filename)
+    clean = re.sub(r'[^a-zA-Z0-9.]', '.', clean)
     
     # Clean up dots
-    clean = re.sub(r'[^a-zA-Z0-9.]', '.', clean)
     clean = re.sub(r'\.+', '.', clean)
+    clean = clean.strip('.')
     
     # If we found a year, make sure it's included in correct format
-    clean = clean.strip('.')
     if years:
         year = years[0]  # Take first year found
         # Remove any existing year from clean name
@@ -138,27 +106,29 @@ def format_filename(filename: str) -> str:
         else:
             # Just append year if single part
             parts.append(year)
-        # Final cleanup of multiple dots
         clean = '.'.join(parts)
     
     # Final cleanup of multiple dots
     clean = re.sub(r'\.+', '.', clean)
     clean = clean.strip('.')
+    
     return clean
 
+# Add this new function near other utility functions
 def format_caption(caption: str) -> str:
     """Format caption with dots instead of spaces and remove special characters"""
     if not caption:
         return caption
-
+        
     # Remove "Credit" line if exists
     caption = re.sub(r'\nCredit.*', '', caption)
-        
+    
     # First extract any years from the caption
     years = re.findall(r'[\[\(\{]?((?:19|20)\d{2})[\]\}\)]?', caption)
     
     # Replace special characters with dots, but keep brackets/parentheses temporarily
-    clean = re.sub(r'[^a-zA-Z0-9\s\(\)\[\]\{\}]', '.', caption)
+    clean = caption
+    clean = re.sub(r'[^a-zA-Z0-9\s\(\)\[\]\{\}]', '.', clean)
     
     # Remove brackets but keep their content
     clean = re.sub(r'[\(\[\{]', '.', clean)
@@ -172,13 +142,15 @@ def format_caption(caption: str) -> str:
     
     # Remove leading/trailing dots
     clean = clean.strip('.')
+    
     return clean
 
+# Add this new function near other utility functions
 def format_button_text(text: str) -> str:
     """Format button text to be concise with dots"""
     if not text:
         return "Unknown File"
-
+        
     # First extract any years from the text
     years = re.findall(r'[\[\(\{]?((?:19|20)\d{2})[\]\}\)]?', text)
     
@@ -197,6 +169,7 @@ def format_button_text(text: str) -> str:
     
     # Remove leading/trailing dots
     clean = clean.strip('.')
+    
     return clean
 
 def normalize_keyword(keyword):
@@ -209,16 +182,16 @@ def split_keywords(keyword):
     # Split the normalized keyword into individual words
     return keyword.split()
 
-# Main handler functions
+# Replace the existing is_user_in_channel function
 async def is_user_in_channel(client, user_id):
     try:
         # First check if user is admin
         if user_id in AUTHORIZED_USER_IDS:
             logger.info(f"Admin user {user_id} detected, skipping channel check")
             return True
-
-        # Try to get channel entity directly using ID
+            
         try:
+            # Try to get channel entity directly using ID
             channel = await client.get_entity(REQUIRED_CHANNEL)  # Use integer directly
             participant = await client(GetParticipantRequest(
                 channel=channel,
@@ -231,590 +204,760 @@ async def is_user_in_channel(client, user_id):
                 return False
             logger.warning(f"Channel check error: {e}")
             return False
+            
     except Exception as e:
         logger.error(f"Channel membership check error: {e}")
+        # If we can't verify, assume not in channel for safety
         return False
 
-async def handle_start(event, client):
-    """Handle /start command"""
-    if not await is_user_in_channel(client, event.sender_id):
-        keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
-        await event.reply(
-            "⚠️ Welcome! You must join our channel first to use this bot!\n\n"
-            "1. Click the button below to join\n"
-            "2. After joining, come back and send /start again",
-            buttons=keyboard
-        )
-        return
-
-    user = event.sender
-    await add_user(
-        user_id=user.id,
-        username=user.username,
-        first_name=user.first_name,
-        last_name=user.last_name
-    )
-    await event.respond('Nak tengok movie apa hari ni? 🎥 Hanya taip tajuknya, dan saya akan carikan untuk anda!')
-
-async def handle_messages(event, client):
-    """Handle incoming messages"""
-    if event.is_private:
-        if not await is_user_in_channel(client, event.sender_id):
-            keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
-            await event.reply(
-                "⚠️ You must join our channel first to use this bot!\n\n"
-                "1. Click the button below to join\n"
-                "2. After joining, come back and try again",
-                buttons=keyboard
-            )
-            return
-
-        await update_user_activity(event.sender_id)
-
-        if event.message.text and not event.message.text.startswith('/'):
-            try:
-                # Create message lock key
-                message_key = f"{event.chat_id}:{event.message.text.lower().strip()}"
-                if message_key in _message_cache:
-                    return
-                _message_cache[message_key] = time.time()
-
-                text = normalize_keyword(event.message.text.lower().strip())
-                keyword_list = split_keywords(text)
-                page = 1
-                page_size = 10
-                offset = (page - 1) * page_size
-                
-                # Search and format results
-                db_results = await search_files(keyword_list, page_size, offset)
-                total_results = await count_search_results(keyword_list)
-                total_pages = math.ceil(total_results / page_size)
-                video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-                
-                if video_results:
-                    await send_search_results(event, text, video_results, page, total_pages, total_results)
-                else:
-                    # Only send no results message if not in cache
-                    no_results_key = f"no_results:{event.chat_id}:{text}"
-                    if no_results_key not in _message_cache:
-                        _message_cache[no_results_key] = time.time()
-                        await event.reply('Movies yang anda cari belum ada boleh request di @Request67_bot.')
-            except Exception as e:
-                logger.error(f"Error handling text message: {e}")
-                await event.reply('Failed to process your request.')
-
-async def handle_callback_query(event, client):
-    """Handle callback queries"""
+# Add error handler for the client
+@client.on(events.NewMessage)
+async def error_handler(event):
     try:
-        data = event.data.decode('utf-8')
-        
-        if data.startswith("page|"):
-            parts = data.split("|")
-            text = parts[1]
-            page = int(parts[2])
-            
-            # Process page change
-            await process_page_change(event, text, page)
-            
-            # Answer callback query silently without causing errors
-            try:
-                await event.answer()
-            except Exception as e:
-                logger.debug(f"Non-critical callback answer error: {e}")
-                
-        elif data.startswith("current|"):
-            # Answer current page callback silently
-            try:
-                await event.answer(f"Current page {data.split('|')[1]}", alert=True)
-            except Exception as e:
-                logger.debug(f"Non-critical callback answer error: {e}")
-                
+        # Your existing event handling code here
+        # ...
+        raise events.StopPropagation
+    except events.StopPropagation:
+        pass  # Stop propagation is expected, do nothing
     except Exception as e:
-        logger.error(f"Error in callback handler: {e}")
+        logger.error(f"Uncaught error: {str(e)}", exc_info=True)
 
-async def format_display_name(file_name: str, caption: str) -> str:
-    """Format display name for results to be shorter and cleaner"""
-    # Try file name first
-    if file_name:
-        # Remove common extensions
-        name = re.sub(r'\.(mp4|mkv|avi|mov|wmv)$', '', file_name)
-        # Limit length
-        if len(name) > 45:
-            name = name[:42] + '...'
-        return name
-    
-    # Fallback to caption
-    if caption:
-        # Remove common patterns
-        clean = re.sub(r'\[.*?\]|\(.*?\)|\{.*?\}', '', caption)
-        clean = re.sub(r'\.+', '.', clean)
-        clean = clean.strip('.')
-        # Limit length
-        if len(clean) > 45:
-            clean = clean[:42] + '...'
-        return clean
-    
-    return "Unknown File"
-
-async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
-    """Helper function to send or edit search results with improved pagination"""
+async def handle_webhook(request):
     try:
-        # Use Redis for deduplication
-        cache_key = f"results:{event.chat_id}:{text}:{page}"
-        if not is_edit:
-            # Check if we sent this result recently
-            last_sent = await redis_cache.get(cache_key)
-            if last_sent:
+        data = await request.json()
+        await client.catch_up()
+        await client._handle_update(data)
+        return web.Response(status=200)
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return web.Response(status=500)
+
+async def setup_webhook():
+    """Configure webhook settings"""
+    try:
+        await client.delete_webhook()
+        await client.set_webhook(url=WEBHOOK_URL)
+        logger.info(f"Webhook set to {WEBHOOK_URL}")
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}")
+        raise
+
+async def init_bot():
+    try:
+        # Get bot info
+        bot_info = await client.get_me()
+        logger.info(f"Bot initialized: @{bot_info.username}")
+        
+        # Get channel info and verify bot's admin status - MODIFIED
+        try:
+            channel = await client.get_entity(REQUIRED_CHANNEL)  # Use integer directly
+            participant = await client(GetParticipantRequest(
+                channel=channel,
+                participant=bot_info.id
+            ))
+            
+            if not participant.participant.admin_rights:
+                logger.warning("⚠️ Bot is not an admin in the channel!")
+            else:
+                logger.info("✅ Bot confirmed as channel admin")
+                
+        except ValueError as e:
+            logger.error(f"Channel access error: {e}")
+            raise
+            
+    except Exception as e:
+        logger.error(f"Bot initialization error: {e}")
+        raise
+
+async def main():
+    try:
+        # Initialize bot and databases
+        await init_bot()
+        await init_db()
+        await init_user_db()
+        await init_premium_db()
+        await redis_cache.init()
+
+        # Setup webhook
+        await setup_webhook()
+        
+        # Setup aiohttp server
+        app = web.Application()
+        app.router.add_post(WEBHOOK_PATH, handle_webhook)
+        
+        # Start the server
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        await site.start()
+        
+        logger.info(f"Webhook server started on port {PORT}")
+        
+        # Keep the server running
+        while True:
+            await asyncio.sleep(3600)  # Sleep for 1 hour
+            
+    except Exception as e:
+        logger.error(f"Critical error in main: {str(e)}", exc_info=True)
+        raise
+
+        # Start bot
+        await client.start()
+        logger.info("Main bot created")
+
+        # Add a test message to verify bot is working
+        logger.info("Bot is now running and listening for messages...")
+
+        # Modify the start function
+        @client.on(events.NewMessage(pattern='/start'))
+        async def start(event):
+            # Check channel membership first
+            if not await is_user_in_channel(client, event.sender_id):
+                keyboard = [
+                    [Button.url("Join Channel", CHANNEL_INVITE_LINK)]
+                ]
+                await event.reply(
+                    "⚠️ Welcome! You must join our channel first to use this bot!\n\n"
+                    "1. Click the button below to join\n"
+                    "2. After joining, come back and send /start again",
+                    buttons=keyboard
+                )
                 return
-            
-            # Set a short TTL to prevent duplicates
-            await redis_cache.set(cache_key, time.time(), 5)  # 5 second cooldown
 
-        header = f"🎬 Found {total_results} results for '{text}'"
-        buttons = []
-        
-        # Create result buttons with better formatting
-        for result in video_results:
-            id, caption, file_name, rank = result
-            display_name = await format_display_name(file_name, caption)
-            token = await store_token(str(id))
-            if token:
-                safe_video_name = urllib.parse.quote(file_name or '', safe='')
-                safe_token = urllib.parse.quote(token, safe='')
-                website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                buttons.append([Button.url(display_name, website_link)])
-
-        # Add pagination buttons
-        if total_pages > 1:
-            nav = []
-            if page > 1:
-                nav.append(Button.inline("«", f"page|{text}|1"))
-                nav.append(Button.inline("‹", f"page|{text}|{page-1}"))
-
-            # Show current page and total pages
-            nav.append(Button.inline(f"•{page}•", f"current|{page}"))
-
-            if page < total_pages:
-                nav.append(Button.inline("›", f"page|{text}|{page+1}"))
-                nav.append(Button.inline("»", f"page|{text}|{total_pages}"))
-
-            buttons.append(nav)
-            
-            # Add bottom nav showing total pages
-            buttons.append([Button.inline(f"Page {page} of {total_pages}", f"current|{page}")])
-
-        # Send or edit message with retries
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                if is_edit:
-                    await event.edit(header, buttons=buttons)
-                else:
-                    await event.respond(header, buttons=buttons)
-                break
-            except errors.MessageNotModifiedError:
-                break
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    logger.error(f"Failed to send/edit message after {max_retries} attempts: {e}")
-                else:
-                    await asyncio.sleep(1)
-
-    except Exception as e:
-        logger.error(f"Error in send_search_results: {e}")
-
-async def process_page_change(event, text, page):
-    """Process page change requests"""
-    try:
-        page_size = 10
-        offset = (page - 1) * page_size
-        
-        keyword_list = split_keywords(text)
-        db_results = await search_files(keyword_list, page_size, offset)
-        total_results = await count_search_results(keyword_list)
-        total_pages = math.ceil(total_results / page_size)
-        video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-        
-        if video_results:
-            await send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=True)
-            
-    except Exception as e:
-        logger.error(f"Error processing page change: {e}")
-
-# Update the message handler to use a more robust cache system
-async def handle_webhook_message(data: dict, client):
-    """Handle webhook message updates"""
-    try:
-        chat = data.get('chat', {})
-        chat_id = chat.get('id')
-        chat_type = chat.get('type')
-        message_id = data.get('message_id')
-        
-        if not chat_id or chat_type != 'private':
-            return
-            
-        text = data.get('text', '')
-        if not text or text.startswith('/'):
-            return
-
-        # More robust duplicate check using message_id and chat_id
-        cache_key = f"msg:{chat_id}:{message_id}:{text}"
-        if await redis_cache.get(cache_key):
-            logger.info(f"Skipping duplicate message: {text}")
-            return
-        await redis_cache.set(cache_key, True, 30)  # Cache for 30 seconds
-
-        # Rest of your existing handle_webhook_message code...
-        if not await is_user_in_channel(client, chat_id):
-            keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
-            await client.send_message(
-                chat_id,
-                "⚠️ You must join our channel first to use this bot!\n\n"
-                "1. Click the button below to join\n"
-                "2. After joining, come back and try again",
-                buttons=keyboard
+            user = event.sender
+            await add_user(
+                user_id=user.id,
+                username=user.username,
+                first_name=user.first_name,
+                last_name=user.last_name
             )
-            return
+            command_args = event.message.text.split()
+            if len(command_args) > 1:
+                token = command_args[1]
+                try:
+                    decoded_token = base64.urlsafe_b64decode(token.encode()).decode()
+                    logger.debug(f"Decoded token: {decoded_token}")
 
-        await update_user_activity(chat_id)
-        
-        # Handle text messages
-        if text and not text.startswith('/'):
+                    result = await get_file_by_token(token)
+                    logger.debug(f"Token verification result: {result}")
+
+                    if result:
+                        file_id = result
+
+                        file_info = await get_file_by_id(file_id)
+                        logger.debug(f"File fetch result: {file_info}")
+
+                        if file_info:
+                            # Note: asyncpg returns Record object, access by key
+                            id = file_info['id']
+                            access_hash = file_info['access_hash']
+                            file_reference = file_info['file_reference']
+                            mime_type = file_info['mime_type']
+                            file_name = file_info['file_name']
+
+                            formatted_caption = file_name.replace(" ", ".").replace("@", "")
+
+                            document = Document(
+                                id=int(id),
+                                access_hash=int(access_hash),
+                                file_reference=bytes(file_reference),  # Convert memoryview to bytes
+                                date=None,
+                                mime_type=mime_type,
+                                size=None,
+                                dc_id=None,
+                                attributes=[DocumentAttributeFilename(file_name=file_name)]
+                            )
+
+                            try:
+                                await client.send_file(
+                                    event.sender_id,
+                                    file=document,
+                                    caption=f"{format_caption(file_info['caption'])}\n\n{BOT_USERNAME}"  # Modified
+                                )
+                                logger.info(f"File {file_name} sent successfully.")
+                            except Exception as e:
+                                logger.error(f"Error sending file: {e}")
+                                await event.respond('Failed to send the file.')
+                        else:
+                            await event.respond('File not found in the database.')
+                            logger.error("File not found in the database.")
+                    else:
+                        await event.respond('Invalid token.')
+                        logger.error("Invalid token.")
+                except (ValueError, UnicodeDecodeError) as e:
+                    logger.error(f"Token decoding error: {e}")
+                    await event.respond('Failed to decode the token. Please try again.')
+            else:
+                await event.respond('Hantar movies apa yang anda mahu.')
+                logger.warning("No token provided.")
+
+        @client.on(events.NewMessage)
+        async def handle_messages(event):
+            if event.is_private:
+                # Check channel membership first
+                if not await is_user_in_channel(client, event.sender_id):
+                    keyboard = [
+                        [Button.url("Join Channel", CHANNEL_INVITE_LINK)]
+                    ]
+                    await event.reply(
+                        "⚠️ You must join our channel first to use this bot!\n\n"
+                        "1. Click the button below to join\n"
+                        "2. After joining, come back and try again",
+                        buttons=keyboard
+                    )
+                    return
+
+                await update_user_activity(event.sender_id)
+                if event.message.document:
+                    try:
+                        user_id = event.message.sender_id
+                        logger.debug(f"User ID: {user_id}")
+
+                        if user_id not in AUTHORIZED_USER_IDS:
+                            await event.reply("Maaf, anda tidak dibenarkan menghantar media kepada bot ini.")
+                            return
+
+                        document = event.message.document
+                        file_name = None
+                        for attr in event.message.document.attributes:
+                            if isinstance(attr, DocumentAttributeFilename):
+                                file_name = format_filename(attr.file_name)  # Format filename when storing
+                                break
+
+                        caption = event.message.message or ""
+                        keywords = normalize_keyword(caption) + " " + normalize_keyword(file_name)
+                        keyword_list = split_keywords(keywords)
+
+                        logger.debug(f"Received document message: {event.message}")
+                        logger.debug(f"Caption: {caption}")
+                        logger.debug(f"Keywords: {keywords}")
+                        logger.debug(f"File Name: {file_name}")
+                        logger.debug(f"Mime Type: {document.mime_type}")
+
+                        # Convert id and access_hash to strings before storing
+                        id = str(document.id)
+                        access_hash = str(document.access_hash)
+                        file_reference = document.file_reference
+                        mime_type = document.mime_type
+
+                        logger.debug(f"Inserting file metadata: id={id}, access_hash={access_hash}, file_reference={file_reference}, mime_type={mime_type}, caption={caption}, keywords={keywords}, file_name={file_name}")
+                        await store_file_metadata(id, access_hash, file_reference, mime_type, caption, keywords, file_name)
+                        await event.reply('File metadata stored.')
+                    except Exception as e:
+                        logger.error(f"Error handling document message: {e}")
+                        await event.reply('Failed to store file metadata.')
+
+                elif event.message.text:
+                    try:
+                        if event.message.text.startswith('/'):
+                            return
+
+                        text = normalize_keyword(event.message.text.lower().strip())
+                        keyword_list = split_keywords(text)
+
+                        page = 1  # Default to first page
+                        page_size = 10  # Number of results per page
+                        offset = (page - 1) * page_size
+
+                        db_results = await search_files(keyword_list, page_size, offset)
+
+                        total_results = await count_search_results(keyword_list)
+                        total_pages = math.ceil(total_results / page_size)
+
+                        video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+
+                        if video_results:
+                            header = f"{total_results} Results for '{text}'"
+                            buttons = []
+                            for result in video_results:
+                                id, caption, file_name, rank = result  # Unpack all 4 values
+                                token = await store_token(str(id))
+                                if token:
+                                    import urllib.parse
+                                    display_name = format_button_text(file_name or caption or "Unknown File")  # Modified
+                                    safe_video_name = urllib.parse.quote(file_name, safe='')
+                                    safe_token = urllib.parse.quote(token, safe='')
+                                    if await is_premium(event.sender_id):
+                                        buttons.append([Button.inline(display_name, f"{id}|{page}")])
+                                    else:
+                                        website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                                        buttons.append([Button.url(display_name, website_link)])
+                            
+                            # Pagination Buttons
+                            pagination_buttons = []
+                            start_page = max(1, page - 2)
+                            end_page = min(total_pages, start_page + 4)
+
+                            for p in range(start_page, end_page + 1):
+                                if p == page:
+                                    pagination_buttons.append(Button.inline(f"[{p}]", f"ignore|{text}|{p}"))
+                                else:
+                                    pagination_buttons.append(Button.inline(str(p), f"page|{text}|{p}"))
+
+                            if page > 1:
+                                pagination_buttons.insert(0, Button.inline("Prev", f"page|{text}|{page - 1}"))
+                            if page < total_pages:
+                                pagination_buttons.append(Button.inline("Next", f"page|{text}|{page + 1}"))
+
+                            buttons.append(pagination_buttons)
+                            if total_pages > 1:
+                                buttons.append([
+                                    Button.inline("First Page", f"page|{text}|1"),
+                                    Button.inline("Last Page", f"page|{total_pages}")  # Added text parameter
+                                ])
+
+                            await event.respond(header, buttons=buttons)
+                        else:
+                            await event.reply('Movies yang anda cari belum ada boleh request di @Request67_bot.')
+                    except Exception as e:
+                        logger.error(f"Error handling text message: {e}")
+                        await event.reply('Failed to process your request.')
+
+        @client.on(events.CallbackQuery)
+        async def callback_query_handler(event):
             try:
-                normalized_text = normalize_keyword(text.lower().strip())
-                keyword_list = split_keywords(normalized_text)
-                page = 1
-                page_size = 10
+                data = event.data.decode('utf-8')
+                user_id = event.sender_id
                 
-                total_results = await count_search_results(keyword_list)
-                if total_results > 0:
-                    total_pages = math.ceil(total_results / page_size)
+                if data.startswith("page|"):
+                    parts = data.split("|")
+                    if len(parts) < 3:
+                        return  # Silently ignore invalid page data
+                        
+                    _, keyword, page = parts
+                    page = int(page)
+                    page_size = 10
                     offset = (page - 1) * page_size
                     
+                    keyword_list = split_keywords(keyword)
                     db_results = await search_files(keyword_list, page_size, offset)
-                    video_results = [r for r in db_results if any(r[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+                    total_results = await count_search_results(keyword_list)
+                    total_pages = math.ceil(total_results / page_size)
+                    
+                    video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
                     
                     if video_results:
+                        header = f"{total_results} Results for '{keyword}'"
                         buttons = []
-                        header = f"🎬 {total_results} Results for '{text}'"
-                        
-                        # Create result buttons
                         for result in video_results:
                             id, caption, file_name, rank = result
                             token = await store_token(str(id))
                             if token:
-                                display_name = format_button_text(file_name or caption or "Unknown File")
-                                safe_video_name = urllib.parse.quote(file_name or '', safe='')
+                                import urllib.parse
+                                display_name = format_button_text(file_name or caption or "Unknown File")  # Modified
+                                safe_video_name = urllib.parse.quote(file_name, safe='')
                                 safe_token = urllib.parse.quote(token, safe='')
+                                
                                 website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
                                 buttons.append([Button.url(display_name, website_link)])
                         
-                        # Add pagination if needed
-                        if total_pages > 1:
-                            nav = []
-                            nav.append(Button.inline("1️⃣", f"page|{normalized_text}|1"))
-                            if page > 1:
-                                nav.append(Button.inline("⬅️", f"page|{normalized_text}|{page-1}"))
-                            nav.append(Button.inline(f"{page}/{total_pages}", f"current|{page}"))
-                            if page < total_pages:
-                                nav.append(Button.inline("➡️", f"page|{normalized_text}|{page+1}"))
-                            nav.append(Button.inline(f"{total_pages}️⃣", f"page|{normalized_text}|{total_pages}"))
-                            buttons.append(nav)
+                        # Pagination Buttons
+                        pagination_buttons = []
+                        start_page = max(1, page - 2)
+                        end_page = min(total_pages, start_page + 4)
                         
-                        await client.send_message(chat_id, header, buttons=buttons)
-                        return
-                
-                await client.send_message(chat_id, 'Movies yang anda cari belum ada boleh request di @Request67_bot.')
-                
-            except Exception as e:
-                logger.error(f"Search error: {e}")
-                await client.send_message(chat_id, 'Failed to process your request.')
-                
-    except Exception as e:
-        logger.error(f"Webhook message handler error: {e}")
-
-async def handle_webhook_callback(data: dict, client):
-    """Handle webhook callback queries"""
-    try:
-        callback_data = data.get('data')
-        if isinstance(callback_data, bytes):
-            callback_data = callback_data.decode('utf-8')
-            
-        message = data.get('message', {})
-        chat_id = message.get('chat', {}).get('id')
-        message_id = message.get('message_id')
-        
-        if callback_data.startswith("page|"):
-            parts = callback_data.split("|")
-            if len(parts) != 3:
-                return
-                
-            text = parts[1]
-            try:
-                page = int(parts[2])
-            except ValueError:
-                return
-                
-            page_size = 10
-            offset = (page - 1) * page_size
-            
-            keyword_list = split_keywords(text)
-            total_results = await count_search_results(keyword_list)
-            
-            if total_results > 0:
-                total_pages = math.ceil(total_results / page_size)
-                db_results = await search_files(keyword_list, page_size, offset)
-                video_results = [r for r in db_results if any(r[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
-                
-                # Use edit_message for pagination updates
-                if video_results:
-                    buttons = []
-                    header = f"🎬 {total_results} Results for '{text}'"
-                    
-                    # Add result buttons
-                    for result in video_results:
-                        id, caption, file_name, rank = result
-                        token = await store_token(str(id))
-                        if token:
-                            display_name = format_button_text(file_name or caption or "Unknown File")
-                            safe_video_name = urllib.parse.quote(file_name or '', safe='')
-                            safe_token = urllib.parse.quote(token, safe='')
-                            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                            buttons.append([Button.url(display_name, website_link)])
-                    
-                    # Add pagination buttons using the same format as send_search_results
-                    if total_pages > 1:
-                        nav = []
                         if page > 1:
-                            nav.append(Button.inline("« First", f"page|{text}|1"))
-                            nav.append(Button.inline("‹", f"page|{text}|{page-1}"))
-                            
-                        visible_pages = 5
-                        start_page = max(1, min(page - (visible_pages // 2), total_pages - visible_pages + 1))
-                        end_page = min(start_page + visible_pages - 1, total_pages)
-                        
+                            pagination_buttons.append(Button.inline("Prev", f"page|{keyword}|{page-1}"))
                         for p in range(start_page, end_page + 1):
                             if p == page:
-                                nav.append(Button.inline(f"[{p}]", f"current|{p}"))
+                                pagination_buttons.append(Button.inline(f"[{p}]", f"ignore|{keyword}|{p}"))
                             else:
-                                nav.append(Button.inline(str(p), f"page|{text}|{p}"))
-                                
+                                pagination_buttons.append(Button.inline(str(p), f"page|{keyword}|{p}"))
                         if page < total_pages:
-                            nav.append(Button.inline("›", f"page|{text}|{page+1}"))
-                            nav.append(Button.inline("Last »", f"page|{text}|{total_pages}"))
-                            
-                        buttons.append(nav)
-                    
-                    # Use raw API method to edit message
-                    try:
-                        await client.edit_message(chat_id, message_id, header, buttons=buttons)
-                    except Exception as e:
-                        logger.error(f"Error editing message: {e}")
+                            pagination_buttons.append(Button.inline("Next", f"page|{keyword}|{page+1}"))
                         
-    except Exception as e:
-        logger.error(f"Webhook callback handler error: {e}")
+                        buttons.append(pagination_buttons)
 
-async def setup_webhook():
-    """Set up webhook for the bot"""
-    try:
-        async with aiohttp.ClientSession() as session:
-            # Delete existing webhook
-            async with session.get(f'https://api.telegram.org/bot{bot_token}/deleteWebhook') as resp:
-                await resp.json()
-
-            # Set new webhook
-            webhook_data = {
-                'url': WEBHOOK_URL,
-                'max_connections': 100,
-                'allowed_updates': ['message', 'callback_query']
-            }
-            async with session.post(
-                f'https://api.telegram.org/bot{bot_token}/setWebhook',
-                json=webhook_data
-            ) as resp:
-                result = await resp.json()
-                if result.get('ok'):
-                    logger.info(f"Webhook set successfully to {WEBHOOK_URL}")
-                    return True
+                        # Only add First/Last page buttons if there are more than one page
+                        if total_pages > 1:
+                            buttons.append([
+                                Button.inline("First Page", f"page|{keyword}|1"),
+                                Button.inline("Last Page", f"page|{total_pages}")  # Added keyword parameter
+                            ])
+                        
+                        try:
+                            await event.edit(header, buttons=buttons)
+                        except errors.MessageNotModifiedError:
+                            pass  # Silently ignore "message not modified" errors
+                    else:
+                        try:
+                            await event.edit("No more results.")
+                        except errors.MessageNotModifiedError:
+                            pass
+                            
+                elif data.startswith("ignore|"):
+                    # Do nothing for current page clicks
+                    await event.answer("Current page")
                 else:
-                    logger.error(f"Failed to set webhook: {result}")
-                    return False
-    except Exception as e:
-        logger.error(f"Error setting webhook: {e}")
-        return False
+                    # Handle direct file ID clicks for premium users
+                    id, current_page = data.split("|")
+                    file_info = await get_file_by_id(str(id))
+                    
+                    if not file_info:
+                        await event.respond("File not found.")
+                        return
 
-async def setup_bot_handlers(client):
-    """Set up all bot event handlers"""
-    logger.info("Setting up bot handlers...")
-    
-    # Register handlers with proper references
-    client.add_event_handler(
-        lambda e: handle_start(e, client),
-        events.NewMessage(pattern='/start')
-    )
-    
-    client.add_event_handler(
-        lambda e: handle_messages(e, client),
-        events.NewMessage
-    )
-    
-    client.add_event_handler(
-        lambda e: handle_callback_query(e, client),
-        events.CallbackQuery
-    )
-    
-    # Add broadcast command handler
-    client.add_event_handler(
-        lambda e: broadcast_command(e, client),
-        events.NewMessage(pattern='/broadcast')
-    )
-    
-    # Add renew command handler
-    client.add_event_handler(
-        lambda e: renew_command(e, client),
-        events.NewMessage(pattern='/renew')
-    )
-    
-    logger.info("Bot handlers set up successfully")
+                    if await is_premium(user_id):
+                        # Premium users get direct file
+                        document = Document(
+                            id=int(file_info['id']),
+                            access_hash=int(file_info['access_hash']),
+                            file_reference=bytes(file_info['file_reference']),
+                            date=None,
+                            mime_type=file_info['mime_type'],
+                            size=None,
+                            dc_id=None,
+                            attributes=[DocumentAttributeFilename(file_name=file_info['file_name'])]
+                        )
 
-# Update the broadcast command
-async def broadcast_command(event, client):
-    """Handle broadcast command"""
-    if event.sender_id not in AUTHORIZED_USER_IDS:
-        await event.reply("You are not authorized to use this command.")
-        return
-        
-    # Get the message to broadcast
-    reply = await event.get_reply_message()
-    if not reply and not event.message.text.replace('/broadcast', '').strip():
-        usage = (
-            "Usage:\n"
-            "1. Text broadcast: /broadcast your message\n"
-            "2. Media broadcast: Reply to a photo/video with /broadcast [caption]\n"
-            "3. Media without caption: Reply with '/broadcast none'\n"
-            "\nNote: Broadcast will not be sent to admin users."
-        )
-        await event.reply(usage)
-        return
+                        try:
+                            progress_msg = await event.respond("🎖 Premium user detected! Preparing your file...")
+                            await asyncio.sleep(1.5)
+                            
+                            await client.send_file(
+                                event.sender_id,
+                                file=document,
+                                caption=f"{format_caption(file_info['caption'])}\n\n{BOT_USERNAME}"  # Modified
+                            )
+                            await progress_msg.delete()
+                        except Exception as e:
+                            logger.error(f"Error sending file to premium user: {e}")
+                            await progress_msg.edit('⚠️ Failed to send file. Please try again or contact support.')
+                    else:
+                        # Free users get website link - direct open without confirmation
+                        token = await store_token(str(id))
+                        if token:
+                            video_name = file_info['file_name']
+                            import urllib.parse
+                            safe_video_name = urllib.parse.quote(video_name, safe='')
+                            safe_token = urllib.parse.quote(token, safe='')
+                            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                            # Use new message with URL button instead of answer
+                            buttons = [[Button.url("🎬 Download Movie", website_link)]]
+                            await event.edit("Choose download option:", buttons=buttons)
+                        else:
+                            await event.respond("Failed to generate download link.")
 
-    users = await get_all_users()
-    sent = 0
-    failed = 0
-    skipped = 0
-    blocked = 0
-    invalid = 0
-    
-    # Show progress message
-    progress = await event.reply("🚀 Broadcasting message...")
-    
-    try:
-        # ... rest of your existing broadcast code ...
-        pass
-    finally:
-        report = (
-            "📬 Broadcast Completed\n\n"
-            f"✅ Successfully sent: {sent}\n"
-            f"❌ Failed: {failed}\n"
-            f"🚫 Blocked: {blocked}\n"
-            f"⚠️ Invalid users: {invalid}\n"
-            f"⏩ Skipped (admins): {skipped}\n"
-            f"👥 Total reach: {sent + failed + blocked + invalid}\n"
-            f"📊 Success rate: {(sent/(sent+failed+blocked+invalid)*100 if sent+failed+blocked+invalid>0 else 0):.1f}%\n\n"
-            f"Total users in database: {len(users)}"
-        )
-        await progress.edit(report)
+            except Exception as e:
+                # Silently log errors without showing to user
+                logger.error(f"Error in callback query handler: {e}")
+                return
 
-# Update the renew command
-async def renew_command(event, client):
-    """Handle renew command"""
-    if event.sender_id not in AUTHORIZED_USER_IDS:
-        await event.reply("You are not authorized to use this command.")
-        return
-    
-    try:
-        args = event.message.text.split()
-        if len(args) != 3:
-            await event.reply("Usage: /renew <user_id> <days>")
-            return
+        @client.on(events.NewMessage(pattern='/listdb'))
+        async def list_db(event):
+            logger.debug("Executing /listdb command")
+            c.execute("SELECT * FROM files")
+            results = c.fetchall()
+            logger.debug(f"Database entries: {results}")
+            await event.reply(f"Database entries: {results}")
 
-        user_id = int(args[1])
-        days = int(args[2])
-
-        if await add_or_renew_premium(user_id, days):
-            expiry_date = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
-            success_message = (
-                "✅ Premium access granted!\n\n"
-                f"👤 User ID: {user_id}\n"
-                f"⏳ Duration: {days} days\n"
-                f"📅 Expires: {expiry_date}"
+        @client.on(events.NewMessage(pattern='/stats'))
+        async def stats_command(event):
+            if event.sender_id not in AUTHORIZED_USER_IDS:
+                await event.reply("You are not authorized to use this command.")
+                return
+                
+            user_count = await get_user_count()
+            active_users = await get_active_users_count()  # Add this function to userdb.py
+            
+            stats_message = (
+                "📊 Bot Statistics 📊\n\n"
+                f"👥 Total Users: {user_count}\n"
+                f"📱 Active Users (24h): {active_users}\n"
+                f"🤖 Bot Status: Online\n"
+                f"⏰ Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                "Admin Commands:\n"
+                "• /broadcast - Send message to all users\n"
+                "• /stats - Show these statistics"
             )
-            await event.reply(success_message)
-        else:
-            await event.reply("Failed to renew premium subscription.")
-    except ValueError:
-        await event.reply("Invalid user ID or number of days.")
-    except Exception as e:
-        logger.error(f"Error in renew_premium: {e}")
-        await event.reply("An error occurred while processing the request.")
+            
+            await event.reply(stats_message)
 
-async def setup_backup_channel(client):
-    """Set up backup channel monitoring"""
-    try:
-        channel = await client.get_entity(BACKUP_CHANNEL_ID)
-        logger.info(f"Successfully connected to backup channel: {channel.title}")
-        
-        @client.on(events.NewMessage(chats=BACKUP_CHANNEL_ID))
-        async def backup_channel_handler(event):
+        @client.on(events.NewMessage(pattern='/broadcast'))
+        async def broadcast_command(event):
+            if event.sender_id not in AUTHORIZED_USER_IDS:
+                await event.reply("You are not authorized to use this command.")
+                return
+            
+            # Get the message to broadcast
+            reply = await event.get_reply_message()
+            if not reply and not event.message.text.replace('/broadcast', '').strip():
+                usage = (
+                    "Usage:\n"
+                    "1. Text broadcast: /broadcast your message\n"
+                    "2. Media broadcast: Reply to a photo/video with /broadcast [caption]\n"
+                    "3. Media without caption: Reply with '/broadcast none'\n"
+                    "\nNote: Broadcast will not be sent to admin users."
+                )
+                await event.reply(usage)
+                return
+                
+            users = await get_all_users()
+            sent = 0
+            failed = 0
+            skipped = 0
+            blocked = 0
+            invalid = 0
+            
+            # Show progress message
+            progress = await event.reply("🚀 Broadcasting message...")
+            
+            try:
+                for user in users:
+                    user_id = user['user_id']
+                    
+                    # Skip if user is an admin
+                    if user_id in AUTHORIZED_USER_IDS:
+                        skipped += 1
+                        continue
+                        
+                    try:
+                        # Get peer directly from ID
+                        try:
+                            peer = await client.get_input_entity(user_id)
+                            if not peer:
+                                raise ValueError("Could not get peer")
+                        except (ValueError, TypeError):
+                            # Try getting entity from API
+                            try:
+                                full_user = await client.get_entity(user_id)
+                                if full_user:
+                                    peer = await client.get_input_entity(full_user)
+                                else:
+                                    raise ValueError("Could not get user entity")
+                            except:
+                                invalid += 1
+                                logger.warning(f"Could not resolve user {user_id}")
+                                continue
+
+                        # Add delay between messages
+                        await asyncio.sleep(0.5)
+
+                        if reply:
+                            if reply.media:
+                                caption = None
+                                if event.message.text.strip().lower() != '/broadcast none':
+                                    caption = event.message.text.replace('/broadcast', '').strip() or reply.text
+                                
+                                try:
+                                    await client.send_file(
+                                        peer,
+                                        file=reply.media,
+                                        caption=caption
+                                    )
+                                    sent += 1
+                                except Exception as e:
+                                    logger.error(f"Error sending media to {user_id}: {e}")
+                                    failed += 1
+                            else:
+                                try:
+                                    await client.send_message(peer, reply.text)
+                                    sent += 1
+                                except Exception as e:
+                                    logger.error(f"Error sending text to {user_id}: {e}")
+                                    failed += 1
+                        else:
+                            message = event.message.text.replace('/broadcast', '').strip()
+                            try:
+                                await client.send_message(peer, message)
+                                sent += 1
+                            except Exception as e:
+                                logger.error(f"Error sending message to {user_id}: {e}")
+                                failed += 1
+
+                        if sent % 5 == 0:
+                            await progress.edit(
+                                f"🚀 Broadcasting...\n"
+                                f"✅ Sent: {sent}\n"
+                                f"❌ Failed: {failed}\n"
+                                f"🚫 Blocked: {blocked}\n"
+                                f"⚠️ Invalid: {invalid}\n"
+                                f"⏩ Skipped (admins): {skipped}"
+                            )
+                        
+                    except UserIsBlockedError:
+                        blocked += 1
+                        logger.warning(f"User {user_id} has blocked the bot")
+                    except FloodWaitError as e:
+                        wait_time = e.seconds
+                        logger.warning(f"Hit flood limit. Waiting {wait_time} seconds")
+                        await progress.edit(f"Hit rate limit. Waiting {wait_time} seconds before continuing...")
+                        await asyncio.sleep(wait_time)
+                    except Exception as e:
+                        logger.error(f"Unexpected error for user {user_id}: {e}")
+                        failed += 1
+
+            finally:
+                report = (
+                    "📬 Broadcast Completed\n\n"
+                    f"✅ Successfully sent: {sent}\n"
+                    f"❌ Failed: {failed}\n"
+                    f"🚫 Blocked: {blocked}\n"
+                    f"⚠️ Invalid users: {invalid}\n"
+                    f"⏩ Skipped (admins): {skipped}\n"
+                    f"👥 Total reach: {sent + failed + blocked + invalid}\n"
+                    f"📊 Success rate: {(sent/(sent+failed+blocked+invalid)*100 if sent+failed+blocked+invalid>0 else 0):.1f}%\n\n"
+                    f"Total users in database: {len(users)}"
+                )
+                await progress.edit(report)
+
+        @client.on(events.NewMessage(pattern='/renew'))
+        async def renew_premium(event):
+            if event.sender_id not in AUTHORIZED_USER_IDS:
+                await event.reply("You are not authorized to use this command.")
+                return
+
+            try:
+                args = event.message.text.split()
+                if len(args) != 3:
+                    await event.reply("Usage: /renew <user_id> <days>")
+                    return
+
+                user_id = int(args[1])
+                days = int(args[2])
+
+                if await add_or_renew_premium(user_id, days):
+                    expiry_date = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+                    success_message = (
+                        "✅ Premium access granted!\n\n"
+                        f"👤 User ID: {user_id}\n"
+                        f"⏳ Duration: {days} days\n"
+                        f"📅 Expires: {expiry_date}"
+                    )
+                    await event.reply(success_message)
+                else:
+                    await event.reply("Failed to renew premium subscription.")
+            except ValueError:
+                await event.reply("Invalid user ID or number of days.")
+            except Exception as e:
+                logger.error(f"Error in renew_premium: {e}")
+                await event.reply("An error occurred while processing the request.")
+
+        @client.on(events.NewMessage(chats=-1002459978004))  # Your backup channel ID
+        async def handle_channel_messages(event):
             try:
                 if event.message.document:
-                    # Process document
-                    await handle_backup_document(event.message)
+                    document = event.message.document
+                    file_name = None
+                    for attr in event.message.document.attributes:
+                        if isinstance(attr, DocumentAttributeFilename):
+                            file_name = attr.file_name
+                            break
+
+                    caption = event.message.message or ""
+                    keywords = normalize_keyword(caption) + " " + normalize_keyword(file_name)
+                    keyword_list = split_keywords(keywords)
+
+                    logger.info(f"Auto-storing file from channel: {file_name}")
+                    
+                    # Convert id and access_hash to strings before storing
+                    id = str(document.id)
+                    access_hash = str(document.access_hash)
+                    file_reference = document.file_reference
+                    mime_type = document.mime_type
+
+                    await store_file_metadata(
+                        id=id,
+                        access_hash=access_hash,
+                        file_reference=file_reference,
+                        mime_type=mime_type,
+                        caption=caption,
+                        keywords=keywords,
+                        file_name=file_name
+                    )
+                    logger.info(f"Successfully stored metadata for {file_name}")
+
             except Exception as e:
-                logger.error(f"Error in backup channel handler: {e}")
+                logger.error(f"Error processing channel message: {e}")
+
+        # Add this function near other command handlers
+        @client.on(events.NewMessage(pattern='/migrate'))
+        async def migrate_command(event):
+            if event.sender_id not in AUTHORIZED_USER_IDS:
+                await event.reply("You are not authorized to use this command.")
+                return
                 
-        logger.info("Backup channel handler set up successfully")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to set up backup channel: {e}")
-        return False
+            try:
+                progress_msg = await event.reply("Starting filename migration...")
+                conn = await AsyncPostgresConnection().__aenter__()
+                
+                # Get all files
+                rows = await conn.fetch('SELECT id, file_name FROM files')
+                total = len(rows)
+                updated = 0
+                last_update = 0
+                
+                for row in rows:
+                    try:
+                        old_name = row['file_name']
+                        if not old_name:
+                            continue
+                            
+                        new_name = format_filename(old_name)
+                        
+                        if old_name != new_name:
+                            await conn.execute(
+                                'UPDATE files SET file_name = $1 WHERE id = $2',
+                                new_name, row['id']
+                            )
+                            updated += 1
+                            
+                            # Show sample of changes every 50 files
+                            if updated % 50 == 0 and updated != last_update:
+                                try:
+                                    await progress_msg.edit(
+                                        f"Migration in progress...\n"
+                                        f"Updated: {updated}/{total} files\n"
+                                        f"Example: {old_name} → {new_name}\n"
+                                        f"Please wait..."
+                                    )
+                                    last_update = updated
+                                    await asyncio.sleep(2)
+                                except Exception as e:
+                                    logger.error(f"Error updating progress: {e}")
+                                    pass
+                    
+                    except Exception as e:
+                        logger.error(f"Error processing file {row['id']}: {e}")
+                        continue
+                
+                # Final update
+                try:
+                    final_message = (
+                        "✅ Filename migration completed!\n\n"
+                        f"📊 Total files processed: {total}\n"
+                        f"🔄 Files updated: {updated}\n\n"
+                        "All filenames now use dots instead of spaces"
+                    )
+                    await progress_msg.edit(final_message)
+                except:
+                    await event.respond(final_message)
+                    
+            except Exception as e:
+                error_msg = f"Migration error: {str(e)}"
+                logger.error(error_msg)
+                await event.respond(error_msg)
+            finally:
+                if conn:
+                    await conn.close()
 
-# FastAPI endpoint
-@app.post(WEBHOOK_PATH)
-async def handle_webhook(request: Request):
-    """Handle incoming webhook updates"""
+        await client.run_until_disconnected()
+    except Exception as e:
+        logger.error(f"Critical error in main: {str(e)}", exc_info=True)
+        raise
+
+if __name__ == "__main__":
     try:
-        data = await request.json()
-        client = await get_client()
-        
-        if 'message' in data:
-            # Replace the direct message handler call with specific webhook message handler
-            await handle_webhook_message(data['message'], client)
-        elif 'callback_query' in data:
-            await handle_webhook_callback(data['callback_query'], client)
-            
-        return {"ok": True}
+        # Delete the session file if it exists
+        session_file = 'bot.session'
+        if os.path.exists(session_file):
+            os.remove(session_file)
+            logger.info(f"Deleted session file: {session_file}")
+
+        with client:
+            client.loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
     except Exception as e:
-        logger.error(f"Error handling webhook: {e}")
-        return {"ok": False, "error": str(e)}
-
-# Export needed functions and variables
-__all__ = [
-    'initialize_client',
-    'setup_bot_handlers',
-    'setup_webhook',
-    'get_client',
-    'WEBHOOK_PATH',
-    'handle_messages',
-    'handle_callback_query',
-    'PORT'
-]
-
-# Update message cache cleanup
-def cleanup_message_cache():
-    """Clean up old message cache entries"""
-    current_time = time.time()
-    expired_keys = [k for k, v in _message_cache.items() if current_time - v > 30]
-    for k in expired_keys:
-        _message_cache.pop(k, None)
-
-
+        logger.error(f"Fatal error: {str(e)}", exc_info=True)
+        raise
