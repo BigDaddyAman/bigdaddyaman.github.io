@@ -322,17 +322,23 @@ async def send_search_results(event, text, video_results, page, total_pages, tot
 async def handle_webhook_message(data: dict, client):
     """Handle webhook message updates"""
     try:
+        # Extract chat info from the message data
         chat = data.get('chat', {})
         chat_id = chat.get('id')
         chat_type = chat.get('type')
         
         if not chat_id or chat_type != 'private':
+            logger.info(f"Skipping non-private chat: {chat_type}")
             return
             
-        user_id = data.get('from', {}).get('id')
+        # Extract user info
+        from_user = data.get('from', {})
+        user_id = from_user.get('id')
         if not user_id:
+            logger.warning("No user ID found in message")
             return
-            
+
+        # Check channel membership
         if not await is_user_in_channel(client, user_id):
             keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
             await client.send_message(
@@ -346,6 +352,7 @@ async def handle_webhook_message(data: dict, client):
 
         await update_user_activity(user_id)
         
+        # Handle text messages
         text = data.get('text', '')
         if text and not text.startswith('/'):
             try:
@@ -354,7 +361,6 @@ async def handle_webhook_message(data: dict, client):
                 page = 1
                 page_size = 10
                 
-                # Get results with improved pagination
                 total_results = await count_search_results(keyword_list)
                 if total_results > 0:
                     total_pages = math.ceil(total_results / page_size)
@@ -378,20 +384,15 @@ async def handle_webhook_message(data: dict, client):
                                 website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
                                 buttons.append([Button.url(display_name, website_link)])
                         
-                        # Add pagination buttons
+                        # Add pagination if needed
                         if total_pages > 1:
                             nav = []
-                            # First page
                             nav.append(Button.inline("1️⃣", f"page|{normalized_text}|1"))
-                            # Previous
                             if page > 1:
                                 nav.append(Button.inline("⬅️", f"page|{normalized_text}|{page-1}"))
-                            # Current
                             nav.append(Button.inline(f"{page}/{total_pages}", f"current|{page}"))
-                            # Next
                             if page < total_pages:
                                 nav.append(Button.inline("➡️", f"page|{normalized_text}|{page+1}"))
-                            # Last page
                             nav.append(Button.inline(f"{total_pages}️⃣", f"page|{normalized_text}|{total_pages}"))
                             buttons.append(nav)
                         
@@ -567,3 +568,4 @@ __all__ = [
     'handle_callback_query',
     'PORT'
 ]
+
