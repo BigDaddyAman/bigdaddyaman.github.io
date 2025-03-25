@@ -31,19 +31,21 @@ WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 WEBHOOK_PATH = f"/webhook/{bot_token}"
 PORT = int(os.getenv('PORT', 8000))
 
-# Replace the direct bot initialization with an async function
+# Initialize bot globally
+bot = TelegramClient(
+    'bot_session', 
+    api_id, 
+    api_hash,
+    system_version="4.16.30-vxCUSTOM",
+    device_model="Railway Server"
+)
+
+# Create initialization function
 async def initialize_bot():
     """Initialize and start the bot"""
-    global bot
-    bot = TelegramClient(
-        'bot_session', 
-        api_id, 
-        api_hash,
-        system_version="4.16.30-vxCUSTOM",
-        device_model="Railway Server"
-    )
-    
     try:
+        if not bot.is_connected():
+            await bot.connect()
         await bot.start(bot_token=bot_token)
         logger.info("Bot initialized successfully")
         return True
@@ -93,7 +95,12 @@ async def lifespan(app: FastAPI):
         logger.info(f"API Hash present: {'Yes' if api_hash else 'No'}")
         logger.info(f"Bot Token present: {'Yes' if bot_token else 'No'}")
 
-        # Check database connection first
+        # Initialize bot first
+        logger.info("Initializing bot...")
+        if not await initialize_bot():
+            raise HTTPException(status_code=503, detail="Bot initialization failed")
+
+        # Check database connection
         logger.info("Checking database connection...")
         if not await wait_for_db():
             logger.error("Database connection failed!")
@@ -104,16 +111,6 @@ async def lifespan(app: FastAPI):
         await init_db()
         await init_user_db()
         await init_premium_db()
-
-        # Check bot connection
-        logger.info("Checking bot connection...")
-        if not bot.is_connected():
-            await bot.connect()
-        
-        me = await bot.get_me()
-        if not me:
-            raise Exception("Bot authentication failed")
-        logger.info(f"Bot connected successfully as @{me.username}")
         
         # Set webhook with retries
         webhook_success = False
@@ -141,15 +138,14 @@ async def lifespan(app: FastAPI):
                 
         yield
         
-        # Cleanup
-        await bot.disconnect()
-        logger.info("Bot disconnected")
-        
     except Exception as e:
         logger.error(f"Startup error: {e}")
+        raise
+    finally:
+        # Cleanup
         if bot and bot.is_connected():
             await bot.disconnect()
-        raise
+            logger.info("Bot disconnected")
 
 # Update FastAPI initialization to use lifespan
 app = FastAPI(
@@ -213,15 +209,6 @@ async def handle_webhook(request: Request):
 # Modify the main part
 if __name__ == "__main__":
     try:
-        # Use asyncio to run the initialization
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # Initialize bot
-        if not loop.run_until_complete(initialize_bot()):
-            raise RuntimeError("Bot initialization failed")
-            
-        # Start uvicorn
         uvicorn.run(
             "webhook_server:app",
             host="0.0.0.0",
@@ -234,5 +221,3 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Server startup error: {e}")
         raise
-    finally:
-        loop.close()
