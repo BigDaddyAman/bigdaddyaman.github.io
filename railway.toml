@@ -5,10 +5,10 @@ buildCommand = "pip install -r requirements.txt"
 [deploy]
 startCommand = "python webhook_server.py"
 healthcheckPath = "/"
-restartPolicyType = "on-failure"
+restartPolicy = "on_failure"
 healthcheckTimeout = 30
 healthcheckInterval = 300
 healthcheckRetries = 3
 
 [service]
-port = 8080  # Update port to 8080
+port = 8080
