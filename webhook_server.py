@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Response, HTTPException
 from telethon import TelegramClient, events, types
+from telethon.sessions import MemorySession  # Add this import
 import uvicorn
 import logging
 import os
@@ -31,9 +32,9 @@ WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 WEBHOOK_PATH = f"/webhook/{bot_token}"
 PORT = int(os.getenv('PORT', 8000))
 
-# Initialize bot globally
+# Initialize bot globally with MemorySession
 bot = TelegramClient(
-    'bot_session', 
+    MemorySession(),  # Use MemorySession instead of string
     api_id, 
     api_hash,
     system_version="4.16.30-vxCUSTOM",
@@ -118,7 +119,7 @@ async def lifespan(app: FastAPI):
         while retries > 0 and not webhook_success:
             try:
                 webhook_info = await bot.get_webhook_info()
-                if webhook_info.url != f"{WEBHOOK_URL}{WEBHOOK_PATH}":
+                if (webhook_info.url != f"{WEBHOOK_URL}{WEBHOOK_PATH}"):
                     success = await bot.set_webhook(url=f"{WEBHOOK_URL}{WEBHOOK_PATH}")
                     if success:
                         logger.info(f"Webhook set to: {WEBHOOK_URL}{WEBHOOK_PATH}")
