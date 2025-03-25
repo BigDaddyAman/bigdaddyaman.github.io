@@ -319,180 +319,172 @@ async def send_search_results(event, text, video_results, page, total_pages, tot
     else:
         await event.respond(header, buttons=buttons)
 
-async def handle_webhook_message(message_data: dict, client):
+async def handle_webhook_message(data: dict, client):
     """Handle webhook message updates"""
     try:
-        # Check if it's a private message
-        chat_type = message_data.get('chat', {}).get('type')
-        if chat_type == 'private':
-            user_id = message_data.get('from', {}).get('id')
+        chat = data.get('chat', {})
+        chat_id = chat.get('id')
+        chat_type = chat.get('type')
+        
+        if not chat_id or chat_type != 'private':
+            return
             
-            if not await is_user_in_channel(client, user_id):
-                # Create response message
-                chat_id = message_data['chat']['id']
-                keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
-                await client.send_message(
-                    chat_id,
-                    "⚠️ You must join our channel first to use this bot!\n\n"
-                    "1. Click the button below to join\n"
-                    "2. After joining, come back and try again",
-                    buttons=keyboard
-                )
-                return
+        user_id = data.get('from', {}).get('id')
+        if not user_id:
+            return
+            
+        if not await is_user_in_channel(client, user_id):
+            keyboard = [[Button.url("Join Channel", CHANNEL_INVITE_LINK)]]
+            await client.send_message(
+                chat_id,
+                "⚠️ You must join our channel first to use this bot!\n\n"
+                "1. Click the button below to join\n"
+                "2. After joining, come back and try again",
+                buttons=keyboard
+            )
+            return
 
-            await update_user_activity(user_id)
-            
-            # Handle text message
-            text = message_data.get('text', '')
-            if text and not text.startswith('/'):
-                try:
-                    normalized_text = normalize_keyword(text.lower().strip())
-                    keyword_list = split_keywords(normalized_text)
-                    page = 1
-                    page_size = 10
+        await update_user_activity(user_id)
+        
+        text = data.get('text', '')
+        if text and not text.startswith('/'):
+            try:
+                normalized_text = normalize_keyword(text.lower().strip())
+                keyword_list = split_keywords(normalized_text)
+                page = 1
+                page_size = 10
+                
+                # Get results with improved pagination
+                total_results = await count_search_results(keyword_list)
+                if total_results > 0:
+                    total_pages = math.ceil(total_results / page_size)
                     offset = (page - 1) * page_size
                     
-                    # Search and format results
                     db_results = await search_files(keyword_list, page_size, offset)
-                    total_results = await count_search_results(keyword_list)
-                    total_pages = math.ceil(total_results / page_size)
-                    video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+                    video_results = [r for r in db_results if any(r[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
                     
-                    chat_id = message_data['chat']['id']
                     if video_results:
-                        await send_webhook_results(client, chat_id, normalized_text, video_results, page, total_pages, total_results)
-                    else:
-                        await client.send_message(chat_id, 'Movies yang anda cari belum ada boleh request di @Request67_bot.')
-                except Exception as e:
-                    logger.error(f"Error handling webhook text message: {e}")
-                    await client.send_message(message_data['chat']['id'], 'Failed to process your request.')
-
+                        buttons = []
+                        header = f"🎬 {total_results} Results for '{text}'"
+                        
+                        # Create result buttons
+                        for result in video_results:
+                            id, caption, file_name, rank = result
+                            token = await store_token(str(id))
+                            if token:
+                                display_name = format_button_text(file_name or caption or "Unknown File")
+                                safe_video_name = urllib.parse.quote(file_name or '', safe='')
+                                safe_token = urllib.parse.quote(token, safe='')
+                                website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                                buttons.append([Button.url(display_name, website_link)])
+                        
+                        # Add pagination buttons
+                        if total_pages > 1:
+                            nav = []
+                            # First page
+                            nav.append(Button.inline("1️⃣", f"page|{normalized_text}|1"))
+                            # Previous
+                            if page > 1:
+                                nav.append(Button.inline("⬅️", f"page|{normalized_text}|{page-1}"))
+                            # Current
+                            nav.append(Button.inline(f"{page}/{total_pages}", f"current|{page}"))
+                            # Next
+                            if page < total_pages:
+                                nav.append(Button.inline("➡️", f"page|{normalized_text}|{page+1}"))
+                            # Last page
+                            nav.append(Button.inline(f"{total_pages}️⃣", f"page|{normalized_text}|{total_pages}"))
+                            buttons.append(nav)
+                        
+                        await client.send_message(chat_id, header, buttons=buttons)
+                        return
+                
+                await client.send_message(chat_id, 'Movies yang anda cari belum ada boleh request di @Request67_bot.')
+                
+            except Exception as e:
+                logger.error(f"Search error: {e}")
+                await client.send_message(chat_id, 'Failed to process your request.')
+                
     except Exception as e:
-        logger.error(f"Error in webhook message handler: {e}")
-        raise
+        logger.error(f"Webhook message handler error: {e}")
 
-async def send_webhook_results(client, chat_id, text, video_results, page, total_pages, total_results):
-    """Send search results for webhook updates"""
-    header = f"{total_results} Results for '{text}'"
-    buttons = []
-    
-    # Create result buttons
-    for result in video_results:
-        id, caption, file_name, rank = result
-        token = await store_token(str(id))
-        if token:
-            display_name = format_button_text(file_name or caption or "Unknown File")
-            safe_video_name = urllib.parse.quote(file_name, safe='')
-            safe_token = urllib.parse.quote(token, safe='')
-            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-            buttons.append([Button.url(display_name, website_link)])
-    
-    # Add pagination if needed
-    if total_pages > 1:
-        pagination = []
-        if page > 1:
-            pagination.append(Button.inline("⬅️ Prev", f"page|{text}|{page-1}"))
-        pagination.append(Button.inline(f"Page {page}/{total_pages}", f"current|{page}"))
-        if page < total_pages:
-            pagination.append(Button.inline("Next ➡️", f"page|{text}|{page+1}"))
-        buttons.append(pagination)
-    
-    await client.send_message(chat_id, header, buttons=buttons)
-
-async def handle_webhook_callback(callback_data: dict, client):
+async def handle_webhook_callback(data: dict, client):
     """Handle webhook callback queries"""
     try:
-        data = callback_data.get('data', '').decode('utf-8') if isinstance(callback_data.get('data'), bytes) else callback_data.get('data', '')
-        chat_id = callback_data.get('message', {}).get('chat', {}).get('id')
-        message_id = callback_data.get('message', {}).get('message_id')
+        query_id = data.get('id')
+        message = data.get('message', {})
+        chat_id = message.get('chat', {}).get('id')
+        message_id = message.get('message_id')
         
-        if data.startswith("page|"):
-            parts = data.split("|")
-            text = parts[1]
-            page = int(parts[2])
+        callback_data = data.get('data', '')
+        if isinstance(callback_data, bytes):
+            callback_data = callback_data.decode('utf-8')
             
+        if not all([query_id, chat_id, message_id, callback_data]):
+            return
+            
+        if callback_data.startswith("page|"):
+            parts = callback_data.split("|")
+            if len(parts) != 3:
+                return
+                
+            text = parts[1]
+            try:
+                page = int(parts[2])
+            except ValueError:
+                return
+                
             page_size = 10
             offset = (page - 1) * page_size
             
             keyword_list = split_keywords(text)
-            db_results = await search_files(keyword_list, page_size, offset)
             total_results = await count_search_results(keyword_list)
-            total_pages = math.ceil(total_results / page_size)
             
-            video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+            if total_results > 0:
+                total_pages = math.ceil(total_results / page_size)
+                db_results = await search_files(keyword_list, page_size, offset)
+                video_results = [r for r in db_results if any(r[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+                
+                if video_results:
+                    buttons = []
+                    header = f"🎬 {total_results} Results for '{text}'"
+                    
+                    # Result buttons
+                    for result in video_results:
+                        id, caption, file_name, rank = result
+                        token = await store_token(str(id))
+                        if token:
+                            display_name = format_button_text(file_name or caption or "Unknown File")
+                            safe_video_name = urllib.parse.quote(file_name or '', safe='')
+                            safe_token = urllib.parse.quote(token, safe='')
+                            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                            buttons.append([Button.url(display_name, website_link)])
+                    
+                    # Pagination
+                    if total_pages > 1:
+                        nav = []
+                        nav.append(Button.inline("1️⃣", f"page|{text}|1"))
+                        if page > 1:
+                            nav.append(Button.inline("⬅️", f"page|{text}|{page-1}"))
+                        nav.append(Button.inline(f"{page}/{total_pages}", f"current|{page}"))
+                        if page < total_pages:
+                            nav.append(Button.inline("➡️", f"page|{text}|{page+1}"))
+                        nav.append(Button.inline(f"{total_pages}️⃣", f"page|{text}|{total_pages}"))
+                        buttons.append(nav)
+                        
+                    await client.edit_message(chat_id, message_id, header, buttons=buttons)
+                    await client.answer_callback_query(query_id)
+                    return
+                    
+            await client.answer_callback_query(query_id, "No more results", show_alert=True)
             
-            if video_results:
-                header = f"{total_results} Results for '{text}'"
-                buttons = await create_results_buttons(video_results, text, page, total_pages)
-                await client.edit_message(
-                    chat_id, 
-                    message_id,
-                    header,
-                    buttons=buttons
-                )
-            else:
-                await client.answer_callback_query(
-                    callback_data['id'],
-                    "No more results",
-                    show_alert=True
-                )
-        elif data.startswith("current|"):
-            page = data.split('|')[1]
-            await client.answer_callback_query(
-                callback_data['id'],
-                f"Current page {page}",
-                show_alert=True
-            )
+        elif callback_data.startswith("current|"):
+            page = callback_data.split("|")[1]
+            await client.answer_callback_query(query_id, f"Current page {page}", show_alert=True)
             
     except Exception as e:
-        logger.error(f"Error in webhook callback handler: {e}")
-        await client.answer_callback_query(
-            callback_data['id'],
-            "Error processing request",
-            show_alert=True
-        )
-
-async def create_results_buttons(video_results, text, page, total_pages):
-    """Create buttons grid with page numbers"""
-    buttons = []
-    
-    # Create result buttons
-    for result in video_results:
-        id, caption, file_name, rank = result
-        token = await store_token(str(id))
-        if token:
-            display_name = format_button_text(file_name or caption or "Unknown File")
-            safe_video_name = urllib.parse.quote(file_name, safe='')
-            safe_token = urllib.parse.quote(token, safe='')
-            website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-            buttons.append([Button.url(display_name, website_link)])
-    
-    # Add improved pagination
-    if total_pages > 1:
-        pagination = []
-        
-        # Always show first page
-        if page > 1:
-            pagination.append(Button.inline("1️⃣", f"page|{text}|1"))
-            
-        # Add previous button if not on first page
-        if page > 1:
-            pagination.append(Button.inline("⬅️", f"page|{text}|{page-1}"))
-        
-        # Add current page button
-        pagination.append(Button.inline(f"•{page}•", f"current|{page}"))
-        
-        # Add next button if not on last page
-        if page < total_pages:
-            pagination.append(Button.inline("➡️", f"page|{text}|{page+1}"))
-            
-        # Always show last page
-        if page < total_pages:
-            pagination.append(Button.inline(f"{total_pages}️⃣", f"page|{text}|{total_pages}"))
-            
-        buttons.append(pagination)
-    
-    return buttons
+        logger.error(f"Webhook callback handler error: {e}")
+        if query_id:
+            await client.answer_callback_query(query_id, "Error processing request", show_alert=True)
 
 # Bot setup functions
 async def setup_webhook():
@@ -555,9 +547,7 @@ async def handle_webhook(request: Request):
         client = await get_client()
         
         if 'message' in data:
-            chat_type = data['message'].get('chat', {}).get('type')
-            if chat_type == 'private':
-                await handle_webhook_message(data['message'], client)
+            await handle_webhook_message(data['message'], client)
         elif 'callback_query' in data:
             await handle_webhook_callback(data['callback_query'], client)
             
