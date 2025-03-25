@@ -15,7 +15,7 @@ import asyncpg
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi.responses import JSONResponse
-from telegram_bot import setup_bot_handlers, client  # Add this import
+from telegram_bot import setup_bot_handlers, initialize_client  # Update import
 
 # Load environment variables
 load_dotenv()
@@ -179,17 +179,20 @@ async def lifespan(app: FastAPI):
         max_retries = 3
         while retry_count < max_retries:
             logger.info(f"Initializing bot (attempt {retry_count + 1}/{max_retries})...")
-            if await initialize_bot():
-                # Set up bot event handlers
-                await setup_bot_handlers(client)
-                logger.info("Bot handlers initialized")
-                break
-            retry_count += 1
-            if retry_count < max_retries:
-                await asyncio.sleep(10)
-        
+            try:
+                client = await initialize_client()
+                if client.is_connected():
+                    await setup_bot_handlers()
+                    logger.info("Bot handlers initialized")
+                    break
+            except Exception as e:
+                logger.error(f"Bot initialization attempt failed: {e}")
+                retry_count += 1
+                if retry_count < max_retries:
+                    await asyncio.sleep(10)
+
         if retry_count == max_retries:
-            raise HTTPException(status_code=503, detail="Bot initialization failed after multiple attempts")
+            raise HTTPException(status_code=503, detail="Bot initialization failed")
 
         # Check database connection
         logger.info("Checking database connection...")

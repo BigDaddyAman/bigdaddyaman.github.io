@@ -216,14 +216,22 @@ WEBHOOK_PATH = f"/webhook/{bot_token}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 PORT = int(os.getenv('PORT', 8000))
 
-# Initialize bot with MemorySession
-client = TelegramClient(
-    MemorySession(),
-    api_id,
-    api_hash,
-    system_version="4.16.30-vxCUSTOM",
-    device_model="Railway Server"
-)
+# Initialize bot globally
+client = None
+
+async def initialize_client():
+    global client
+    if client is None:
+        client = TelegramClient(
+            MemorySession(),
+            api_id,
+            api_hash,
+            system_version="4.16.30-vxCUSTOM",
+            device_model="Railway Server"
+        )
+        await client.connect()
+        await client.start(bot_token=bot_token)
+    return client
 
 async def setup_webhook():
     """Set up webhook for the bot"""
