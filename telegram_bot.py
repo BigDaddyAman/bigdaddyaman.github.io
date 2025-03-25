@@ -219,16 +219,6 @@ async def error_handler(event):
     except Exception as e:
         logger.error(f"Uncaught error: {str(e)}", exc_info=True)
 
-async def setup_webhook():
-    """Configure webhook settings"""
-    try:
-        await client.delete_webhook()
-        await client.set_webhook(url=WEBHOOK_URL)
-        logger.info(f"Webhook set to {WEBHOOK_URL}")
-    except Exception as e:
-        logger.error(f"Failed to set webhook: {e}")
-        raise
-
 async def init_bot():
     try:
         # Get bot info
@@ -271,16 +261,17 @@ async def main():
         async def handle_webhook(request: Request):
             try:
                 data = await request.json()
-                await client.catch_up()
+                # Parse the update and process it
                 await client._handle_update(data)
                 return {"status": "ok"}
             except Exception as e:
                 logger.error(f"Webhook error: {e}")
                 return {"status": "error", "message": str(e)}
 
-        # Setup webhook
-        await setup_webhook()
-        
+        @app.get("/")
+        async def health_check():
+            return {"status": "ok", "message": "Bot is running"}
+
         # Start FastAPI server
         config = uvicorn.Config(
             app=app,
