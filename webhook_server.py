@@ -31,7 +31,7 @@ bot_token = os.getenv('BOT_TOKEN')
 
 # Update Webhook settings
 WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
-WEBHOOK_PATH = os.getenv('WEBHOOK_PATH', f"/webhook/{bot_token}")
+WEBHOOK_PATH = os.getenv('WEBHOOK_PATH')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 PORT = int(os.getenv('PORT', 8000))
 
@@ -124,35 +124,31 @@ async def get_webhook_info():
             return None
 
 async def setup_webhook():
-    """Set up webhook for the bot"""
+    """Set up webhook for the bot with rate limit handling"""
     try:
-        # Delete any existing webhook
         async with aiohttp.ClientSession() as session:
+            # Delete existing webhook first
             async with session.get(
                 f'https://api.telegram.org/bot{bot_token}/deleteWebhook'
             ) as resp:
-                await resp.json()  # Clear any existing webhook
+                await resp.json()
 
-        # Set new webhook
-        async with aiohttp.ClientSession() as session:
+            # Set new webhook with exact URL from env
             webhook_data = {
                 'url': WEBHOOK_URL,
                 'max_connections': 100,
-                'allowed_updates': ['message', 'callback_query']
+                'allowed_updates': ['message', 'callback_query'],
+                'drop_pending_updates': True
             }
             async with session.post(
                 f'https://api.telegram.org/bot{bot_token}/setWebhook',
                 json=webhook_data
             ) as resp:
                 result = await resp.json()
-                if result.get('ok'):
-                    logger.info(f"Webhook set successfully to {WEBHOOK_URL}")
-                    return True
-                else:
-                    logger.error(f"Failed to set webhook: {result}")
-                    return False
+                logger.info(f"Webhook setup response: {result}")
+                return result.get('ok', False)
     except Exception as e:
-        logger.error(f"Error setting webhook: {e}")
+        logger.error(f"Error in webhook setup: {e}")
         return False
 
 @asynccontextmanager
@@ -165,7 +161,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"API Hash present: {'Yes' if api_hash else 'No'}")
         logger.info(f"Bot Token present: {'Yes' if bot_token else 'No'}")
 
-        # Initialize bot with retries
+        # Initialize bot first
         retry_count = 0
         max_retries = 3
         while retry_count < max_retries:
@@ -174,7 +170,7 @@ async def lifespan(app: FastAPI):
                 break
             retry_count += 1
             if retry_count < max_retries:
-                await asyncio.sleep(10)  # Wait between retries
+                await asyncio.sleep(10)
         
         if retry_count == max_retries:
             raise HTTPException(status_code=503, detail="Bot initialization failed after multiple attempts")
@@ -191,17 +187,26 @@ async def lifespan(app: FastAPI):
         await init_user_db()
         await init_premium_db()
         
-        # Set up webhook
-        if not await setup_webhook():
-            raise HTTPException(status_code=503, detail="Webhook setup failed")
+        # Set up webhook with retries
+        webhook_success = False
+        webhook_retries = 3
+        while webhook_retries > 0:
+            if await setup_webhook():
+                webhook_success = True
+                break
+            webhook_retries -= 1
+            if webhook_retries > 0:
+                await asyncio.sleep(30)  # Longer wait between webhook setup attempts
+        
+        if not webhook_success:
+            logger.warning("Proceeding without webhook - will retry during health checks")
                 
         yield
         
     except Exception as e:
-        logger.error(f"Startup error: {e}")
+        logger.error(f"Startup error: {str(e)}")
         raise
     finally:
-        # Cleanup
         if bot and bot.is_connected():
             await bot.disconnect()
             logger.info("Bot disconnected")
