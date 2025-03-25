@@ -24,9 +24,9 @@ async def cleanup_old_cache():
     """Cleanup task to remove old cache entries"""
     while True:
         try:
-            # Get all message cache keys
+            # Use scan_iter instead of keys for better performance
             pattern = "msg:*"
-            keys = await redis_cache.keys(pattern)
+            keys = await redis_cache.scan_iter(pattern)
             current_time = time.time()
             
             for key in keys:
@@ -34,7 +34,8 @@ async def cleanup_old_cache():
                     value = await redis_cache.get(key)
                     if value and (current_time - float(value)) > 30:
                         await redis_cache.delete(key)
-                except:
+                except Exception as e:
+                    logger.debug(f"Error cleaning up key {key}: {e}")
                     continue
                     
         except Exception as e:

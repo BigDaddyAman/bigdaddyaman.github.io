@@ -331,6 +331,30 @@ async def handle_callback_query(event, client):
     except Exception as e:
         logger.error(f"Error in callback handler: {e}")
 
+async def format_display_name(file_name: str, caption: str) -> str:
+    """Format display name for results to be shorter and cleaner"""
+    # Try file name first
+    if file_name:
+        # Remove common extensions
+        name = re.sub(r'\.(mp4|mkv|avi|mov|wmv)$', '', file_name)
+        # Limit length
+        if len(name) > 45:
+            name = name[:42] + '...'
+        return name
+    
+    # Fallback to caption
+    if caption:
+        # Remove common patterns
+        clean = re.sub(r'\[.*?\]|\(.*?\)|\{.*?\}', '', caption)
+        clean = re.sub(r'\.+', '.', clean)
+        clean = clean.strip('.')
+        # Limit length
+        if len(clean) > 45:
+            clean = clean[:42] + '...'
+        return clean
+    
+    return "Unknown File"
+
 async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
     """Helper function to send or edit search results with improved pagination"""
     try:
@@ -345,60 +369,38 @@ async def send_search_results(event, text, video_results, page, total_pages, tot
             # Set a short TTL to prevent duplicates
             await redis_cache.set(cache_key, time.time(), 5)  # 5 second cooldown
 
-        # Prepare buttons in batches for better performance
-        header = f"🎬 {total_results} Results for '{text}'"
+        header = f"🎬 Found {total_results} results for '{text}'"
         buttons = []
         
-        # Create result buttons in chunks
-        chunk_size = 5
-        for i in range(0, len(video_results), chunk_size):
-            chunk = video_results[i:i + chunk_size]
-            chunk_buttons = []
-            
-            for result in chunk:
-                id, caption, file_name, rank = result
-                display_name = format_button_text(file_name or caption or "Unknown File")
-                token = await store_token(str(id))
-                if token:
-                    safe_video_name = urllib.parse.quote(file_name, safe='')
-                    safe_token = urllib.parse.quote(token, safe='')
-                    website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
-                    chunk_buttons.append([Button.url(display_name, website_link)])
-            
-            buttons.extend(chunk_buttons)
-            if i + chunk_size < len(video_results):
-                await asyncio.sleep(0.1)  # Small delay between chunks
+        # Create result buttons with better formatting
+        for result in video_results:
+            id, caption, file_name, rank = result
+            display_name = await format_display_name(file_name, caption)
+            token = await store_token(str(id))
+            if token:
+                safe_video_name = urllib.parse.quote(file_name or '', safe='')
+                safe_token = urllib.parse.quote(token, safe='')
+                website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
+                buttons.append([Button.url(display_name, website_link)])
 
-        # Add improved pagination with numbers and First/Last buttons
+        # Add pagination buttons
         if total_pages > 1:
             nav = []
-            nav_bottom = []
-            
-            # First page and Previous buttons
             if page > 1:
                 nav.append(Button.inline("«", f"page|{text}|1"))
                 nav.append(Button.inline("‹", f"page|{text}|{page-1}"))
 
-            # Numbered buttons
-            for p in range(max(1, page-2), min(total_pages+1, page+3)):
-                if p == page:
-                    nav.append(Button.inline(f"[{p}]", f"current|{p}"))
-                else:
-                    nav.append(Button.inline(str(p), f"page|{text}|{p}"))
+            # Show current page and total pages
+            nav.append(Button.inline(f"•{page}•", f"current|{page}"))
 
-            # Next and Last buttons
             if page < total_pages:
                 nav.append(Button.inline("›", f"page|{text}|{page+1}"))
                 nav.append(Button.inline("»", f"page|{text}|{total_pages}"))
 
-            # Bottom nav with First/Last Page text buttons
-            nav_bottom = [
-                Button.inline("First Page", f"page|{text}|1"),
-                Button.inline("Last Page", f"page|{text}|{total_pages}")
-            ]
-
             buttons.append(nav)
-            buttons.append(nav_bottom)
+            
+            # Add bottom nav showing total pages
+            buttons.append([Button.inline(f"Page {page} of {total_pages}", f"current|{page}")])
 
         # Send or edit message with retries
         max_retries = 3

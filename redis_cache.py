@@ -3,7 +3,7 @@ import json
 import os
 from dotenv import load_dotenv
 import logging
-from typing import Optional, Any
+from typing import Optional, Any, List
 from urllib.parse import urlparse
 
 load_dotenv()
@@ -94,6 +94,26 @@ class RedisCache:
             logger.error(f"Redis delete error: {e}")
             return False
 
+    async def keys(self, pattern: str) -> List[str]:
+        """Get all keys matching pattern"""
+        try:
+            if not self.redis:
+                return []
+            return self.redis.keys(pattern)
+        except Exception as e:
+            logger.error(f"Redis keys error: {e}")
+            return []
+
+    async def scan_iter(self, pattern: str) -> List[str]:
+        """Scan keys matching pattern (more efficient than keys)"""
+        try:
+            if not self.redis:
+                return []
+            return [key for key in self.redis.scan_iter(pattern)]
+        except Exception as e:
+            logger.error(f"Redis scan error: {e}")
+            return []
+
     async def check_cache(self, keyword: str) -> dict:
         """Check cache status for a keyword"""
         try:
@@ -101,7 +121,7 @@ class RedisCache:
                 return {"status": "disconnected"}
                 
             pattern = f"*{keyword}*"
-            all_keys = self.redis.keys(pattern)
+            all_keys = await self.scan_iter(pattern)
             cache_data = {}
             
             for key in all_keys:
