@@ -78,9 +78,9 @@ async def handle_webhook(request: Request):
         
         # Handle different types of updates
         if 'message' in update_data:
-            await telegram_bot.handle_messages(update_data['message'], client)
+            await telegram_bot.handle_webhook_message(update_data['message'], client)
         elif 'callback_query' in update_data:
-            await telegram_bot.handle_callback_query(update_data['callback_query'], client)
+            await telegram_bot.handle_webhook_callback(update_data['callback_query'], client)
 
         return Response(status_code=200)
     except Exception as e:
