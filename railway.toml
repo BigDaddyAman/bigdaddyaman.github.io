@@ -12,3 +12,6 @@ healthcheckRetries = 3
 
 [service]
 port = 8080
+
+[envs]
+PORT = { value = "8080" }

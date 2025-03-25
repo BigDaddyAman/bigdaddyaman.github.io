@@ -1,12 +1,18 @@
-# Imports
 import logging
 from telethon import TelegramClient, events, Button, errors
-from telethon.tl.types import Document, DocumentAttributeFilename, InputPeerUser
+from telethon.tl.types import Document, DocumentAttributeFilename, InputPeerUser, InputPeerChannel, ChannelParticipantsSearch
 from telethon.errors.rpcerrorlist import UserIsBlockedError, FloodWaitError, UserDeactivatedError
+from telethon.sessions import MemorySession
+from telethon.tl.functions.channels import GetParticipantRequest
+from telethon.tl.functions.bots import SetBotCommandsRequest
+from telethon.tl.types import BotCommand
+from fastapi import FastAPI, Request
+import aiohttp
 import uuid
 import re
 import math
-from datetime import datetime, timedelta  # Add timedelta import here
+import urllib.parse
+from datetime import datetime, timedelta
 import base64
 from dotenv import load_dotenv
 import os
@@ -21,27 +27,15 @@ from userdb import (
     get_user_count, update_user_activity, get_active_users_count
 )
 from premium import init_premium_db, is_premium, add_or_renew_premium, get_premium_status
-from telethon.sessions import MemorySession  # Add this import
-from telethon.tl.types import (
-    InputPeerChannel,
-    ChannelParticipantsSearch
-)
 
-from telethon.tl.functions.channels import GetParticipantRequest
-
-# Add new webhook imports
-from fastapi import FastAPI, Request
-from telethon.tl.functions.bots import SetBotCommandsRequest
-from telethon.tl.types import BotCommand
+# Load environment variables and configure logging
+load_dotenv()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+logger = logging.getLogger(__name__)
 
 # Initialize settings and client
 _client = None
 app = FastAPI()
-
-# Configure logging and load environment variables
-load_dotenv()
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
-logger = logging.getLogger(__name__)
 
 # Bot settings
 api_id = int(os.getenv('API_ID'))
@@ -87,19 +81,19 @@ def format_filename(filename: str) -> str:
     """Format filename consistently when storing or displaying"""
     if not filename:
         return filename
-        
+
     # First extract any years from the filename
     years = re.findall(r'[\[\(\{]?((?:19|20)\d{2})[\]\}\)]?', filename)
     
     # Create clean version without any brackets
     clean = re.sub(r'[\[\(\{].*?[\]\}\)]', '.', filename)
-    clean = re.sub(r'[^a-zA-Z0-9.]', '.', clean)
     
     # Clean up dots
+    clean = re.sub(r'[^a-zA-Z0-9.]', '.', clean)
     clean = re.sub(r'\.+', '.', clean)
-    clean = clean.strip('.')
     
     # If we found a year, make sure it's included in correct format
+    clean = clean.strip('.')
     if years:
         year = years[0]  # Take first year found
         # Remove any existing year from clean name
@@ -112,28 +106,27 @@ def format_filename(filename: str) -> str:
         else:
             # Just append year if single part
             parts.append(year)
+        # Final cleanup of multiple dots
         clean = '.'.join(parts)
     
     # Final cleanup of multiple dots
     clean = re.sub(r'\.+', '.', clean)
     clean = clean.strip('.')
-    
     return clean
 
 def format_caption(caption: str) -> str:
     """Format caption with dots instead of spaces and remove special characters"""
     if not caption:
         return caption
-        
+
     # Remove "Credit" line if exists
     caption = re.sub(r'\nCredit.*', '', caption)
-    
+        
     # First extract any years from the caption
     years = re.findall(r'[\[\(\{]?((?:19|20)\d{2})[\]\}\)]?', caption)
     
     # Replace special characters with dots, but keep brackets/parentheses temporarily
-    clean = caption
-    clean = re.sub(r'[^a-zA-Z0-9\s\(\)\[\]\{\}]', '.', clean)
+    clean = re.sub(r'[^a-zA-Z0-9\s\(\)\[\]\{\}]', '.', caption)
     
     # Remove brackets but keep their content
     clean = re.sub(r'[\(\[\{]', '.', clean)
@@ -147,14 +140,13 @@ def format_caption(caption: str) -> str:
     
     # Remove leading/trailing dots
     clean = clean.strip('.')
-    
     return clean
 
 def format_button_text(text: str) -> str:
     """Format button text to be concise with dots"""
     if not text:
         return "Unknown File"
-        
+
     # First extract any years from the text
     years = re.findall(r'[\[\(\{]?((?:19|20)\d{2})[\]\}\)]?', text)
     
@@ -173,7 +165,6 @@ def format_button_text(text: str) -> str:
     
     # Remove leading/trailing dots
     clean = clean.strip('.')
-    
     return clean
 
 def normalize_keyword(keyword):
@@ -186,16 +177,16 @@ def split_keywords(keyword):
     # Split the normalized keyword into individual words
     return keyword.split()
 
-# Replace the existing is_user_in_channel function
+# Main handler functions
 async def is_user_in_channel(client, user_id):
     try:
         # First check if user is admin
         if user_id in AUTHORIZED_USER_IDS:
             logger.info(f"Admin user {user_id} detected, skipping channel check")
             return True
-            
+
+        # Try to get channel entity directly using ID
         try:
-            # Try to get channel entity directly using ID
             channel = await client.get_entity(REQUIRED_CHANNEL)  # Use integer directly
             participant = await client(GetParticipantRequest(
                 channel=channel,
@@ -208,13 +199,10 @@ async def is_user_in_channel(client, user_id):
                 return False
             logger.warning(f"Channel check error: {e}")
             return False
-            
     except Exception as e:
         logger.error(f"Channel membership check error: {e}")
-        # If we can't verify, assume not in channel for safety
         return False
 
-# Handler functions
 async def handle_start(event, client):
     """Handle /start command"""
     if not await is_user_in_channel(client, event.sender_id):
@@ -250,7 +238,7 @@ async def handle_messages(event, client):
             return
 
         await update_user_activity(event.sender_id)
-        
+
         if event.message.text and not event.message.text.startswith('/'):
             try:
                 text = normalize_keyword(event.message.text.lower().strip())
@@ -263,7 +251,6 @@ async def handle_messages(event, client):
                 db_results = await search_files(keyword_list, page_size, offset)
                 total_results = await count_search_results(keyword_list)
                 total_pages = math.ceil(total_results / page_size)
-                
                 video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
                 
                 if video_results:
@@ -282,7 +269,6 @@ async def handle_callback_query(event, client):
             parts = data.split("|")
             text = parts[1]
             page = int(parts[2])
-            
             page_size = 10
             offset = (page - 1) * page_size
             
@@ -290,7 +276,6 @@ async def handle_callback_query(event, client):
             db_results = await search_files(keyword_list, page_size, offset)
             total_results = await count_search_results(keyword_list)
             total_pages = math.ceil(total_results / page_size)
-            
             video_results = [result for result in db_results if any(result[2].lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
             
             if video_results:
@@ -306,14 +291,13 @@ async def handle_callback_query(event, client):
 async def send_search_results(event, text, video_results, page, total_pages, total_results, is_edit=False):
     """Helper function to send or edit search results"""
     header = f"{total_results} Results for '{text}'"
-    buttons = []
-    
     # Create result buttons
+    buttons = []
     for result in video_results:
         id, caption, file_name, rank = result
+        display_name = format_button_text(file_name or caption or "Unknown File")
         token = await store_token(str(id))
         if token:
-            display_name = format_button_text(file_name or caption or "Unknown File")
             safe_video_name = urllib.parse.quote(file_name, safe='')
             safe_token = urllib.parse.quote(token, safe='')
             website_link = f"https://bigdaddyaman.github.io?token={safe_token}&videoName={safe_video_name}"
@@ -340,10 +324,8 @@ async def setup_webhook():
     """Set up webhook for the bot"""
     try:
         async with aiohttp.ClientSession() as session:
-            # First delete any existing webhook
-            async with session.get(
-                f'https://api.telegram.org/bot{bot_token}/deleteWebhook'
-            ) as resp:
+            # Delete existing webhook
+            async with session.get(f'https://api.telegram.org/bot{bot_token}/deleteWebhook') as resp:
                 await resp.json()
 
             # Set new webhook
@@ -371,6 +353,7 @@ async def setup_bot_handlers(client):
     """Set up all bot event handlers"""
     logger.info("Setting up bot handlers...")
     
+    # Register handlers with proper references
     client.add_event_handler(
         lambda e: handle_start(e, client),
         events.NewMessage(pattern='/start')
@@ -394,60 +377,19 @@ async def handle_webhook(request: Request):
     """Handle incoming webhook updates"""
     try:
         data = await request.json()
-        update = types.Update.from_dict(data)
         client = await get_client()
         
-        if update.message:
-            await handle_messages(update.message, client)
-        elif update.callback_query:
-            await handle_callback_query(update.callback_query, client)
+        if 'message' in data:
+            await handle_messages(data['message'], client)
+        elif 'callback_query' in data:
+            await handle_callback_query(data['callback_query'], client)
             
         return {"ok": True}
     except Exception as e:
         logger.error(f"Error handling webhook: {e}")
         return {"ok": False, "error": str(e)}
 
-# Update main function to use FastAPI
-async def main():
-    try:
-        # Initialize bot and webhook
-        if not await init_bot():
-            raise Exception("Bot initialization failed")
-
-        # Initialize databases
-        await init_db()
-        await init_user_db()
-        await init_premium_db()
-        
-        await setup_bot_handlers(client)
-
-        # Start FastAPI server
-        import uvicorn
-        config = uvicorn.Config(
-            "telegram_bot:app",
-            host="0.0.0.0",
-            port=PORT,
-            log_level="info"
-        )
-        server = uvicorn.Server(config)
-        await server.serve()
-        
-    except Exception as e:
-        logger.error(f"Critical error in main: {str(e)}", exc_info=True)
-        raise
-
-# Update entry point
-if __name__ == "__main__":
-    try:
-        import asyncio
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Fatal error: {str(e)}", exc_info=True)
-        raise
-
-# Export needed functions and variables for webhook_server.py
+# Export needed functions and variables
 __all__ = [
     'initialize_client',
     'setup_bot_handlers',
@@ -458,4 +400,3 @@ __all__ = [
     'handle_callback_query',
     'PORT'
 ]
-

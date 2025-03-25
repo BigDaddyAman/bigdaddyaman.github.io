@@ -18,10 +18,6 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bot settings
-PORT = int(os.getenv('PORT', 8080))
-WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', '')
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for FastAPI application"""
@@ -54,7 +50,7 @@ async def lifespan(app: FastAPI):
             await client.disconnect()
             logger.info("Bot disconnected")
 
-# Update FastAPI initialization to use lifespan
+# Initialize FastAPI with lifespan
 app = FastAPI(
     title="Telegram Bot Webhook Server",
     lifespan=lifespan
@@ -69,19 +65,22 @@ async def health_check():
 async def handle_webhook(request: Request):
     """Handle incoming webhook updates"""
     try:
-        if WEBHOOK_SECRET:
+        # Get webhook secret from environment
+        webhook_secret = os.getenv('WEBHOOK_SECRET', '')
+        if webhook_secret:
             secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
-            if secret != WEBHOOK_SECRET:
+            if secret != webhook_secret:
                 raise HTTPException(status_code=403, detail="Invalid secret token")
 
+        # Parse update data
         update_data = await request.json()
-        update = types.Update.from_dict(update_data)
-
         client = await telegram_bot.get_client()
-        if update.message:
-            await telegram_bot.handle_message(update.message, client)
-        elif update.callback_query:
-            await telegram_bot.handle_callback_query(update.callback_query, client)
+        
+        # Handle different types of updates
+        if 'message' in update_data:
+            await telegram_bot.handle_messages(update_data['message'], client)
+        elif 'callback_query' in update_data:
+            await telegram_bot.handle_callback_query(update_data['callback_query'], client)
 
         return Response(status_code=200)
     except Exception as e:
@@ -89,4 +88,5 @@ async def handle_webhook(request: Request):
         return Response(status_code=500)
 
 if __name__ == "__main__":
-    uvicorn.run("webhook_server:app", host="0.0.0.0", port=PORT, log_level="info")
+    port = int(os.getenv('PORT', 8080))
+    uvicorn.run("webhook_server:app", host="0.0.0.0", port=port, log_level="info")
