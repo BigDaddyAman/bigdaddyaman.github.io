@@ -29,7 +29,6 @@ from telethon.tl.types import (
 from telethon.tl.functions.channels import GetParticipantRequest
 from fastapi import FastAPI, Request
 import uvicorn
-from redis_cache import RedisCache, redis_cache  # Import the singleton instance
 import json
 
 # Load environment variables from .env file
@@ -73,9 +72,6 @@ WEBHOOK_PATH = os.getenv('WEBHOOK_PATH')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL') 
 WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
 PORT = int(os.getenv('PORT', 8080))
-
-# Initialize Redis cache
-redis_cache = RedisCache()
 
 # Add this function near the top with other utility functions
 def format_filename(filename: str) -> str:
@@ -267,7 +263,6 @@ async def main():
         await init_db()
         await init_user_db()
         await init_premium_db()
-        # No need to initialize Redis here as it's done in the module
         
         # Create FastAPI app
         app = FastAPI()

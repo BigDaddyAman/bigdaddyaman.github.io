@@ -6,8 +6,6 @@ from dotenv import load_dotenv
 import uuid
 import base64
 from typing import List, Tuple, Optional
-from functools import lru_cache
-from redis_cache import redis_cache
 
 # Load environment variables from .env file
 load_dotenv()
@@ -69,24 +67,6 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_tokens_file_id 
             ON tokens(file_id)
         ''')
-        
-        # Add additional indexes for faster searches
-        await conn.execute('''
-            CREATE INDEX IF NOT EXISTS idx_files_file_name_lower 
-            ON files (lower(file_name));
-        ''')
-        
-        await conn.execute('''
-            CREATE INDEX IF NOT EXISTS idx_files_caption_lower 
-            ON files (lower(caption));
-        ''')
-        
-        # Add index for full text search
-        await conn.execute('''
-            CREATE INDEX IF NOT EXISTS idx_files_full_text 
-            ON files USING gin(to_tsvector('english', coalesce(file_name, '') || ' ' || coalesce(caption, '')));
-        ''')
-        
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
         raise
@@ -103,18 +83,6 @@ async def store_file_metadata(id: str, access_hash: str, file_reference: bytes,
         id_str = str(id)
         access_hash_str = str(access_hash)
         
-        # Ensure caption and keywords are strings, not None
-        safe_caption = str(caption) if caption is not None else ""
-        safe_keywords = str(keywords) if keywords is not None else ""
-        safe_file_name = str(file_name) if file_name is not None else ""
-        
-        # Clean the caption to remove unwanted patterns
-        cleaned_caption = re.sub(r'\((.*?GB)\)', '', safe_caption).strip()  # Remove size in parentheses
-        cleaned_caption = re.sub(r'IMDB\.Rating\.[0-9.]+', '', cleaned_caption)  # Remove IMDB rating
-        cleaned_caption = re.sub(r'Genre\.[a-zA-Z.]+', '', cleaned_caption)  # Remove Genre
-        cleaned_caption = re.sub(r'\.+', '.', cleaned_caption)  # Replace multiple dots with single dot
-        cleaned_caption = cleaned_caption.strip('.')  # Remove leading/trailing dots
-        
         await conn.execute('''
             INSERT INTO files 
             (id, access_hash, file_reference, mime_type, caption, keywords, file_name)
@@ -126,11 +94,7 @@ async def store_file_metadata(id: str, access_hash: str, file_reference: bytes,
                 caption = EXCLUDED.caption,
                 keywords = EXCLUDED.keywords,
                 file_name = EXCLUDED.file_name
-        ''', id_str, access_hash_str, file_reference, mime_type, cleaned_caption, safe_keywords, safe_file_name)
-        
-    except Exception as e:
-        logger.error(f"Error storing file metadata: {e}")
-        return None
+        ''', id_str, access_hash_str, file_reference, mime_type, caption, keywords, file_name)
     finally:
         await conn.close()
 
@@ -200,105 +164,50 @@ async def get_file_by_id(file_id: str) -> Optional[Tuple]:
             logger.error(f"Database error while fetching file: {e}")
             return None
 
-# Add this cache decorator to search_files
-@lru_cache(maxsize=100)
-def cache_key(keyword_list_str: str, page_size: int, offset: int) -> str:
-    return f"{keyword_list_str}:{page_size}:{offset}"
-
-# Update search function to be more efficient
+# Modify search_files to prioritize exact matches and limit results
 async def search_files(keyword_list: List[str], page_size: int, offset: int):
-    """Search files with improved performance and Redis caching"""
-    # Create cache key
-    cache_key = f"search:{','.join(sorted(keyword_list))}:{page_size}:{offset}"
-    
-    # Try to get from cache first
-    cached_results = await redis_cache.get(cache_key)
-    if cached_results:
-        return cached_results
-    
     conn = await connect_to_db()
     if not conn:
         return []
-        
     try:
-        # Simplified and fixed search query
-        query = """
-            SELECT 
-                id, 
-                caption, 
-                file_name,
-                ts_rank_cd(
-                    setweight(to_tsvector('english', coalesce(file_name, '')), 'A') ||
-                    setweight(to_tsvector('english', coalesce(caption, '')), 'B'),
-                    plainto_tsquery('english', $1)
-                ) as rank
+        # Join keywords with AND for exact matches, then OR for partial matches
+        exact_match = ' & '.join(f"'{kw}'" for kw in keyword_list)
+        partial_match = ' | '.join(f"'{kw}':*" for kw in keyword_list)
+        tsquery = f"({exact_match}) | {partial_match}"
+        
+        query = '''
+            SELECT id, caption, file_name,
+                   ts_rank_cd(to_tsvector('english', keywords), to_tsquery('english', $1)) as rank
             FROM files 
-            WHERE 
-                to_tsvector('english', coalesce(file_name, '') || ' ' || coalesce(caption, '')) @@ 
-                plainto_tsquery('english', $1)
-                OR LOWER(file_name) LIKE LOWER($2)
-                OR LOWER(caption) LIKE LOWER($2)
-            ORDER BY rank DESC, file_name ASC
-            LIMIT $3 OFFSET $4
-        """
-        
-        search_pattern = f"%{' '.join(keyword_list)}%"
-        results = await conn.fetch(
-            query,
-            ' '.join(keyword_list),
-            search_pattern,
-            page_size,
-            offset
-        )
-        
-        # Convert results to list of tuples for JSON serialization
-        results_list = [(r['id'], r['caption'], r['file_name'], float(r['rank'])) for r in results]
-        
-        # Cache the results
-        await redis_cache.set(cache_key, results_list, 3600)  # Cache for 1 hour
-        
-        return results_list
-        
-    except Exception as e:
-        logger.error(f"Search error: {e}")
+            WHERE to_tsvector('english', keywords) @@ to_tsquery('english', $1)
+            ORDER BY rank DESC, id DESC
+            LIMIT $2 OFFSET $3
+        '''
+        return await conn.fetch(query, tsquery, page_size, offset)
+    except asyncpg.PostgresError as e:
+        logger.error(f"Database error in search: {e}")
         return []
     finally:
         await conn.close()
 
 # Modify count_search_results to use the GIN index
 async def count_search_results(keyword_list: List[str]) -> int:
-    """Count search results with Redis caching"""
-    cache_key = f"count:{','.join(sorted(keyword_list))}"
-    
-    # Try to get from cache first
-    cached_count = await redis_cache.get(cache_key)
-    if cached_count is not None:
-        return cached_count
-        
     conn = await connect_to_db()
     if not conn:
         return 0
-        
     try:
-        query = """
+        tsquery = ' | '.join(f"'{kw}':*" for kw in keyword_list)
+        query = '''
             SELECT COUNT(*) 
             FROM files 
-            WHERE 
-                to_tsvector('english', coalesce(file_name, '') || ' ' || coalesce(caption, '')) @@ 
-                plainto_tsquery('english', $1)
-                OR LOWER(file_name) LIKE LOWER($2)
-                OR LOWER(caption) LIKE LOWER($2)
-        """
-        
-        search_pattern = f"%{' '.join(keyword_list)}%"
-        count = await conn.fetchval(query, ' '.join(keyword_list), search_pattern)
-        
-        # Cache the count
-        await redis_cache.set(cache_key, count, 3600)  # Cache for 1 hour
-        
-        return count
+            WHERE to_tsvector('english', keywords) @@ to_tsquery('english', $1)
+        '''
+        return await conn.fetchval(query, tsquery)
+    except asyncpg.PostgresError as e:
+        logger.error(f"Database error in count: {e}")
+        return 0
     except Exception as e:
-        logger.error(f"Count error: {e}")
+        logger.error(f"Unexpected error in count: {e}")
         return 0
     finally:
         await conn.close()
