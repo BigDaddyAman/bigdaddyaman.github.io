@@ -18,6 +18,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Bot settings
+PORT = int(os.getenv('PORT', 8080))
+WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', '')
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for FastAPI application"""
