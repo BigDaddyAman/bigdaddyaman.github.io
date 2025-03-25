@@ -33,7 +33,7 @@ bot_token = os.getenv('BOT_TOKEN')
 WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
 WEBHOOK_PATH = os.getenv('WEBHOOK_PATH')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-PORT = int(os.getenv('PORT', 8000))
+PORT = int(os.getenv('PORT', 8080))  # Change default port to 8080
 
 # Initialize bot globally with MemorySession
 bot = TelegramClient(
@@ -133,20 +133,29 @@ async def setup_webhook():
             ) as resp:
                 await resp.json()
 
-            # Set new webhook with exact URL from env
-            webhook_data = {
-                'url': WEBHOOK_URL,
-                'max_connections': 100,
-                'allowed_updates': ['message', 'callback_query'],
-                'drop_pending_updates': True
-            }
-            async with session.post(
-                f'https://api.telegram.org/bot{bot_token}/setWebhook',
-                json=webhook_data
-            ) as resp:
-                result = await resp.json()
-                logger.info(f"Webhook setup response: {result}")
-                return result.get('ok', False)
+            # Retry logic for setting webhook
+            while True:
+                webhook_data = {
+                    'url': WEBHOOK_URL,
+                    'max_connections': 100,
+                    'allowed_updates': ['message', 'callback_query'],
+                    'drop_pending_updates': True
+                }
+                async with session.post(
+                    f'https://api.telegram.org/bot{bot_token}/setWebhook',
+                    json=webhook_data
+                ) as resp:
+                    result = await resp.json()
+                    if result.get('ok'):
+                        logger.info(f"Webhook set successfully to {WEBHOOK_URL}")
+                        return True
+                    elif result.get('error_code') == 429:
+                        retry_after = result.get('parameters', {}).get('retry_after', 60)
+                        logger.warning(f"Rate limited. Retrying after {retry_after} seconds...")
+                        await asyncio.sleep(retry_after)
+                    else:
+                        logger.error(f"Failed to set webhook: {result}")
+                        return False
     except Exception as e:
         logger.error(f"Error in webhook setup: {e}")
         return False
@@ -286,7 +295,7 @@ if __name__ == "__main__":
         uvicorn.run(
             "webhook_server:app",
             host="0.0.0.0",
-            port=PORT,
+            port=PORT,  # Use updated port
             workers=1,
             loop="asyncio",
             log_level="info",

@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      API_ID: ${API_ID}
+      API_HASH: ${API_HASH}
+      BOT_TOKEN: ${BOT_TOKEN}
+      GROUP_CHAT_ID: ${GROUP_CHAT_ID}
+      PGDATABASE: ${PGDATABASE}
+      PGHOST: postgres
+      PGPASSWORD: ${PGPASSWORD}
+      PGPORT: 5432
+      PGUSER: ${PGUSER}
+      PORT: 8080
+      WEBHOOK_HOST: ${WEBHOOK_HOST}
+      WEBHOOK_PATH: ${WEBHOOK_PATH}
+      WEBHOOK_URL: ${WEBHOOK_URL}
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:14
+    restart: always
+    environment:
+      POSTGRES_DB: ${PGDATABASE}
+      POSTGRES_USER: ${PGUSER}
+      POSTGRES_PASSWORD: ${PGPASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

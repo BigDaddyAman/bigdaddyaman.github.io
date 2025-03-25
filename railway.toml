@@ -11,4 +11,4 @@ healthcheckInterval = 60
 healthcheckRetries = 5
 
 [service]
-port = 8000
+port = 8080  # Update port to 8080
