@@ -55,32 +55,56 @@ bot_token = os.getenv('BOT_TOKEN')
 # Configure FastAPI
 from contextlib import asynccontextmanager
 
+# Move client initialization after event loop setup
+client = None
+application = None
+
+async def setup_clients():
+    global client, application
+    
+    # Initialize TelegramClient
+    client = TelegramClient(
+        MemorySession(),
+        api_id,
+        api_hash,
+        connection_retries=None,
+        auto_reconnect=True
+    )
+    
+    # Initialize python-telegram-bot application
+    application = Application.builder().token(bot_token).build()
+    
+    # Start both clients
+    await client.start(bot_token=bot_token)
+    await application.initialize()
+    
+    return client, application
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     try:
-        # Initialize databases
+        # Initialize databases first
         await init_db()
         await init_user_db()
         await init_premium_db()
         
-        # Start client
-        await client.start()
+        # Initialize bot and clients
+        await setup_clients()
+        await init_bot()
         
-        # Setup webhook
-        if not await setup_webhook():
-            logger.error("Failed to setup webhook")
-            
         logger.info("Bot started successfully")
         yield
     except Exception as e:
         logger.error(f"Startup error: {e}")
         raise
     finally:
-        # Shutdown
-        await client.disconnect()
+        # Cleanup
+        if client:
+            await client.disconnect()
+        if application:
+            await application.shutdown()
 
-# Update FastAPI app initialization with lifespan
+# Update FastAPI app initialization
 app = FastAPI(lifespan=lifespan)
 
 # Add CORS middleware
@@ -91,16 +115,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-client = TelegramClient(
-    MemorySession(),  # Use StringSession() if you want to save the session
-    api_id,
-    api_hash,
-    connection_retries=None,
-    auto_reconnect=True
-).start(bot_token=bot_token)
-
-application = Application.builder().token(bot_token).build()
 
 VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.ts', '.mov', '.avi', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg', '.3gp', '.3g2']
 
@@ -1044,42 +1058,48 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Add this function to handle startup
 async def start():
-    # Initialize databases
-    await init_db()
-    await init_user_db()
-    await init_premium_db()
-    
-    # Add handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_command))
-    
-    # Start both clients
-    await client.start()
-    await application.initialize()
-    await application.start()
-    
-    # Run both clients
-    async with application:
-        await application.run_polling()
+    try:
+        # Initialize event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Initialize clients
+        await setup_clients()
+        
+        # Initialize bot handlers
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_command))
+        
+        # Run application
+        async with application:
+            await application.run_polling(allowed_updates=Update.ALL_TYPES)
+            
+    except Exception as e:
+        logger.error(f"Error in start(): {e}")
+        raise
 
 if __name__ == "__main__":
     try:
-        # Delete the session file if it exists
+        # Delete session file if exists
         session_file = 'bot.session'
         if os.path.exists(session_file):
             os.remove(session_file)
             logger.info(f"Deleted session file: {session_file}")
-
+        
         # Create and set event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        # Run the start function
+        # Run everything in the same loop
         loop.run_until_complete(start())
+        loop.run_forever()
+        
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}", exc_info=True)
         raise
     finally:
+        loop.stop()
         loop.close()
+
