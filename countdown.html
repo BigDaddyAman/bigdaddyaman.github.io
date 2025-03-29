@@ -197,7 +197,7 @@
             const token = urlParams.get('token');
             const videoName = urlParams.get('videoName'); // Ensure videoName is fetched
             if (token && videoName) {
-                const telegramLink = `https://t.me/Kakifilemv1Bot?start=${encodeURIComponent(token)}`;
+                const telegramLink = `https://t.me/KakifilemBot?start=${encodeURIComponent(token)}`;
                 console.log(`Sending token to: ${telegramLink}`);
                 window.open(telegramLink, '_blank', 'noopener,noreferrer');
                 getFileButton.textContent = "Sudah Dihantar";
@@ -245,7 +245,7 @@
                 "Terima kasih atas kesabaran anda! 🙏"
             );
 
-            const groupLink = `https://t.me/kakifilemreport1`;
+            const groupLink = `https://t.me/KakifilemReport1`;
             window.open(groupLink, '_blank', 'noopener,noreferrer');
         }
 

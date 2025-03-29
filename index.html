@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dapatkan Pautan Video Anda</title>
+    <meta name="monetag" content="5f607e8b3932c7d9970ff176e1c087b6">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            flex-direction: column;
+        }
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            max-width: 90%;
+            width: 400px;
+        }
+        h1 {
+            color: #4ff;
+            text-shadow: 0 0 10px rgba(0,255,255,0.5);
+            margin-bottom: 20px;
+        }
+        img {
+            max-width: 150px;
+            height: auto;
+            margin-bottom: 20px;
+            border-radius: 50%;
+            box-shadow: 0 0 20px rgba(79, 255, 255, 0.3);
+            transition: transform 0.3s ease;
+        }
+        img:hover {
+            transform: scale(1.05);
+        }
+        button {
+            background: linear-gradient(45deg, #4ff, #4f9);
+            color: #1a1a2e;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 255, 255, 0.4);
+        }
+        footer {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #4ff;
+            opacity: 0.7;
+        }
+        .logs {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-family: monospace;
+            text-align: left;
+            max-height: 100px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            color: #4ff;
+        }
+        .countdown {
+            font-size: 18px;
+            color: #4ff;
+            margin: 10px 0;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+    </style>
+    <script src="https://kulroakonsu.net/88/tag.min.js" data-zone="119209" async data-cfasync="false"></script>
+    <script src="InPagePush.js" async></script>
+</head>
+<body>
+    <div class="container">
+        <img src="https://i.ibb.co/JqSwfKv/your-image.jpg" alt="Image" class="pulse">
+        <h1>Selamat Datang!</h1>
+        <p>Sila tunggu sebentar untuk mendapatkan pautan video anda.</p>
+        <div class="countdown" id="countdown">7</div>
+        <div class="logs" id="logs"></div>
+    </div>
+
+    <footer>
+        © Kakfilem 2025
+    </footer>
+
+    <script>
+        function addLog(message) {
+            const logs = document.getElementById('logs');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logs.appendChild(entry);
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        function startCountdown() {
+            const countdownElement = document.getElementById('countdown');
+            let seconds = 7;
+
+            addLog('Starting countdown...');
+
+            const interval = setInterval(() => {
+                seconds--;
+                countdownElement.textContent = seconds;
+                
+                if (seconds <= 0) {
+                    clearInterval(interval);
+                    countdownElement.style.display = 'none';
+                    addLog('Countdown completed');
+                    redirectToCountdown();
+                }
+            }, 1000);
+        }
+
+        function redirectToCountdown() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const token = urlParams.get('token');
+            const videoName = urlParams.get('videoName');
+            
+            if (token && videoName) {
+                addLog('Redirecting to countdown page...');
+                const countdownLink = `countdown.html?token=${encodeURIComponent(token)}&videoName=${encodeURIComponent(videoName)}`;
+                window.location.href = countdownLink;
+            } else {
+                addLog('Error: No token or video name found');
+                alert("No token or video name found in URL");
+            }
+        }
+
+        // Start countdown when page loads
+        window.onload = function() {
+            addLog('Page loaded');
+            startCountdown();
+        };
+    </script>
+</body>
+</html>
